@@ -23,7 +23,8 @@ Class[RawBuffer,
         },
         {{}},
         form
-    ]
+    ],
+    "ClassMethods" -> {"FromCPU"}
 ]
 
 RawBuffer[args___] := RawBuffer["New"[args]]

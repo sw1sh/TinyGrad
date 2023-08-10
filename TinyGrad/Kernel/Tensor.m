@@ -56,7 +56,7 @@ Tensor @ "Init"[
     |>]
 ]
 
-Tensor["Properties"] = {"Device", "Shape", "Type"}
+Tensor["Properties"] = {"Device", "Shape", "Type", "Normal"}
 
 Tensor[(prop : "Device" | "Shape" | "Type")[self_]] := self["LazyData"][prop]
 
@@ -73,6 +73,8 @@ Tensor["Assign"[self_, x_]] := Enclose @ Block[{tensor = Tensor[x, "Type" -> sel
 ]
 
 Tensor["Detach"[self_]] := Tensor[self["LazyData"], self["Device"], False]
+
+Tensor["Normal"[self_]] := self["LazyData"]["ToCPU"[]]
 
 Tensor["Pad"[self_, pad : {{_Integer, _Integer} ...}, value_ : 0]] :=
     TensorFunction["Pad"] @ "Apply"[self, pad]

@@ -12,8 +12,9 @@ Class[LazyBuffer,
         self["Op"] = op;
         self
     ),
-    "Properties" -> {"Shape", "Key"},
+    "Properties" -> {"Shape", "Key", "OpName"},
     "Shape"[self_] :> self["ShapeTracker"]["Shape"],
+    "OpName"[self_] :> self["Op"]["Op"],
     "Key"[self_] :> {self["Type"], If[self["Realized"] =!= None, self["Realized"]["Key"], self["Op"]], self["ShapeTracker"]["Key"]}
 ]
 
@@ -29,21 +30,37 @@ LazyBuffer[device_, shapeTracker_, op_, type_, src_ : None] :=
 
 LazyBuffer["Realize"[self_]] := (
     If[ self["Realized"] === None,
-        self["Realized"] = Device[self["Device"]]["Execute"[self["Op"], self, Sequence @@ self["DeviceExtraArguments"]]]
+        If[ MemberQ[$LoadOps, self["OpName"]],
+            DispatchLoadOp[self["OpName"]][self],
+            self["Realized"] = Device[self["Device"]]["Execute"[self["Op"], self]]
+        ]
     ];
     self
 )
 
 LazyBuffer["LoadOp"[op_, shape_, type_, device_, arg_ : None, src_ : None]] :=
-    LazyBuffer[device, ShapeTracker[shape], op[If[src === None, {}, {src}], arg], type]
+    LazyBuffer[device, ShapeTracker[shape], LazyOp[op, If[src === None, {}, {src}], arg], type]
 
 LazyBuffer["FromCPU"[x : _ ? NumericArrayQ]] :=
-    LazyBuffer["CPU", ShapeTracker[Dimensions[x], {View[Dimensions[x]]}], LazyOp["EMPTY", {}], NumericArrayType[x]]
+    LazyBuffer["CPU", ShapeTracker[Dimensions[x], {View[Dimensions[x]]}], LazyOp["EMPTY", {}], NumericArrayType[x], RawArrayBuffer["FromCPU"[x]]]
 
 LazyBuffer["ConstLike"[self_, val_]] := self @* "LoadOp"["CONST", {}, self["Type"], self["Device"], val] @* "Reshape"[ConstantArray[1, Length[self["Shape"]]]] @* "Expand"[self["Shape"]]
 
 LazyBuffer["ToCPU"[self_]] := self @* "Contiguous"[] @* "Realize"[] @* "Realized"
 
+LazyBuffer["Cast"[self_, type_]] := If[type === self["Type"], self, ElementwiseOp["CAST", self, type]]
+
+LazyBuffer["UnaryOp"[self_, op_]] := ElementwiseOp[op, self]
+
+LazyBuffer["BinaryOp"[self_, op_, y_::[LazyBuffer]]] := ElementwiseOp[op, self, y]
+
+LazyBuffer["TernaryOp"[self_, op_, y_::[LazyBuffer], z_::[LazyBuffer]]] := ElementwiseOp[op, self, y, z]
+
+LazyBuffer["Contiguous"[self_]] := If[
+    self["Realized"] =!= None && self["OpName"] === "CONTIGUOUS",
+    self,
+    LazyBuffer[self["Device"], ShapeTracker[self["Shape"]], LazyOp["CONTIGUOUS", {self}], self["Type"]]
+]
 
 LazyBuffer["Buffers"[self_]] := {self}
 
@@ -64,7 +81,7 @@ LazyBuffer["Format"[self_, form_]] :=
 Device = <|"CPU" -> CPUBuffer|>
 
 
-RealizeContiguous[buffer : LazyBuffer["Pattern"]] := Block[{
+RealizeContiguous[buffer_::[LazyBuffer]] := Block[{
     realized = buffer["Op"]["Source"][[1]]["Realize"[]]["Realized"]
 },
     If[
@@ -78,9 +95,20 @@ RealizeContiguous[buffer : LazyBuffer["Pattern"]] := Block[{
     ]
 ]
 
-RealizeCustom[buffer : LazyBuffer["Pattern"]] :=
+RealizeCustom[buffer_::[LazyBuffer]] :=
     buffer["Realized"] = buffer["Op"]["Argument"][buffer, Sequence @@ Through[buffer["Op"]["Source"]["Realize"]]]
 
-RealizeEmpty[buffer : LazyBuffer["Pattern"]] :=
+RealizeEmpty[buffer_::[LazyBuffer]] :=
     buffer["Realized"] = Device[buffer["Device"]]["Buffer"][Times @@ buffer["Shape"], buffer["Type"], Sequence @@ buffer["DeviceExtraArgs"]]
 
+ElementwiseOp[op_, srcs : PatternSequence[x_, ___], Shortest[arg : Except[_::[LazyBuffer]] : None]] := Wiht[{
+    device = x["Device"], shape = x["Shape"],
+    type = If[op === "CAST", Replace[arg, None :> Tensor["Type"]], Commonest[Through[{srcs}["Type"]]]]
+},
+    LazyBuffer[device, ShapeTracker[shape], LazyOp[op, srcs, arg], type]
+]
+
+DispatchLoadOp = <|
+    "EMPTY" -> RealizeEmpty,
+    "CONTIGUOUS" -> RealizeContiguous
+|>

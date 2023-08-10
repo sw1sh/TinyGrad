@@ -1,6 +1,7 @@
 Package["TinyGrad`"]
 
-PackageExport[CPUBuufer]
+PackageExport[RawArrayBuffer]
+PackageExport[CPUBuffer]
 
 
 
@@ -30,11 +31,13 @@ OpFunctionMap = <|
     "WHERE" -> Function[Null, #1["Where"[##2]]]
 |>
 
-Class[StridedArrayBuffer[RawBuffer],
-    "Init"[self_ , size_, type_, buf_] :>
-        self["Class"]["Init"[size, type, If[buf === None, StridedArray["Empty"[size, type]], buf]]],
-    "FromCPU"[cls_, x_] :> cls[x["Size"], x["Type"], x],
+Class[RawArrayBuffer[RawBuffer],
+    "Init"[self_ , size_, type_, buf_ : None] :> (
+        self["Class"]["Init"[size, type, If[buf === None, StridedArray["Empty"[size, type]], buf]]];
+        self
+    ),
+    "FromCPU"[cls_, x_ ? NumericArrayQ] :> cls["New"[Times @@ Dimensions[x], NumericArrayType[x], x]],
     "ToCPU"[self_] :> self["Data"]
 ]
 
-CPUBuffer = Interpreted["New"[StridedArrayBuffer, OpFunctionMap, Automatic, Automatic, StridedArrayBuffer["FromCPU"[##]] &]]
+CPUBuffer = Interpreted["New"[RawArrayBuffer, OpFunctionMap, Automatic, Automatic, StridedArrayBuffer["FromCPU"[##]] &], CPUBuffer]

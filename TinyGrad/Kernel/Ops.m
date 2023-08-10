@@ -1,6 +1,7 @@
 Package["TinyGrad`"]
 
 PackageExport[LazyOp]
+PackageExport[Interpreted]
 
 PackageScope[$UnaryOps]
 PackageScope[$BinaryOps]
@@ -60,7 +61,7 @@ LazyOp[args___] := LazyOp["New"[args]]
 
 Class[Interpreted,
 
-    "Init"[self_, buffer_, map : KeyValuePattern[Op -> _], fromLazyBuffer : Automatic, toBuffer : Automatic, fromBuffer : None] :> (
+    "Init"[self_, buffer_, map : KeyValuePattern[Op -> _], fromLazyBuffer_ : Automatic, toBuffer_ : Automatic, fromBuffer_ : None] :> (
         self["Buffer"] = buffer;
         self["Map"] = map;
         self["FromLazyBuffer"] = Replace[fromLazyBuffer, Automatic -> Function[#["Realized"]]];
@@ -70,7 +71,7 @@ Class[Interpreted,
         self["CodeGen"] = None;
     ),
 
-    "Execute"[self_, lazyOp_, output_ : None, context_Symbol : None, args___] :> Enclose @ Block[{
+    "Execute"[self_, lazyOp_::[LazyOp], output_ : None, context : _ ? Developer`SymbolQ : None, args___] :> Enclose @ Block[{
         ast = lazyOp,
         newContext, sources,
         ret
@@ -81,6 +82,7 @@ Class[Interpreted,
         If[context =!= None && KeyExistsQ[context, ast], Return[context[ast]]];
         newContext = If[context === None, <||>, context];
         sources = Map[If[LazyOpQ[#], self[Unevaluated @ "Execute"[#, None, newContext, args]], self["FromLazyBuffer"][#]] &, ast["Source"]];
+        ConfirmAssert[KeyExistsQ[self["Map"], ast["Op"]], ast["Op"]];
         ret = self["FromBuffer"][
             self["Map"][ast["Op"]] @@ If[ast["Argument"] === None, Identity, Append[ast["Argument"]]][self["ToBuffer"] /@ sources]
         ];

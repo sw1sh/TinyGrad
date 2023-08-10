@@ -102,6 +102,7 @@ Class[StridedArray,
         self
     ],
 
+    "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
     "Arange"[n_Integer ? NonNegative, shape : Shape | Automatic : Automatic] :>
         StridedArray[Range[n]] @ If[shape === Automatic, CoIdentity, "Reshape"[shape]]
 ]

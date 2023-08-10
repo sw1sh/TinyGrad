@@ -20,7 +20,10 @@ Strides = {___Integer}
 
 
 ShapeStrides[shape : Shape, size : Size : 1] :=
-    MapThread[If[#2 == 1, 0, #1] &, {Reverse[FoldList[Times, size, shape[[-1 ;; 2 ;; -1]]]], shape}]
+    If[ shape === {},
+        {},
+        MapThread[If[#2 == 1, 0, #1] &, {Reverse[FoldList[Times, size, shape[[-1 ;; 2 ;; -1]]]], shape}]
+    ]
 
 ShapeStrides[shape : Shape, strides : Strides] := Enclose @ With[{shapeStrides = Thread[{shape, strides}]},
     ConfirmAssert[Length[shape] == Length[strides]];
@@ -107,11 +110,30 @@ MergeViews[view2_, view1_] := Block[{st, strides},
     View[view1["Shape"], strides, st["RealOffset"], view1["Mask"]]
 ]
 
-ViewReshape[view : View["Pattern"], newShape : Shape] := Block[{
+ViewReshape[view_::[View], newShape : Shape] := Block[{
     shape, mask, strides, offset,
+    pos, newPos,
     newView, mergedView
 },
     {shape, mask, strides, offset} = view /@ {"Shape", "Mask", "Strides", "Offset"};
+    {pos, newPos} = Position[#, Except[1], {1}, Heads -> False] & /@ {shape, newShape};
+    If[ Extract[shape, pos] === Extract[newShape, newPos],
+        newStrides = ReplacePart[
+            Replace[newShape, 1 -> 0, {1}],
+            Thread[newPos -> Extract[strides, pos]]
+        ];
+        If[ mask =!= None,
+            newMask = If[
+                MemberQ[Thread[{shape, mask}], {1, Except[{0, 1}]}],
+                ConstantArray[{0, 0}, Length[newShape]],
+                ReplacePart[
+                    Replace[newShape, 1 -> {0, 1}, {1}],
+                    Thread[newPos -> Extract[mask, pos]]
+                ]
+            ]
+        ];
+        Return[{View[newShape, newStrides, offset], False}]
+    ];
     newView = View[newShape, ShapeStrides[newShape]];
     If[view["ContiguousQ"], Return[{newView, False}]];
     mergedView = MergeViews[view, newView];
@@ -122,8 +144,8 @@ ViewReshape[view : View["Pattern"], newShape : Shape] := Block[{
 
 Class[ShapeTracker,
 
-    "Init"[self_, shape : ShapeTracker["Pattern"] | {___Integer}, views : {View["Pattern"] ...} | None : None] :> (
-        self["Views"] = If[views === None, If[MatchQ[shape, ShapeTracker["Pattern"]], shape["Views"], shapeViews[shape]], views];
+    "Init"[self_, shape : (_::[ShapeTracker]) | {___Integer}, views : {_::[View] ...} | None : None] :> (
+        self["Views"] = If[views === None, If[MatchQ[shape, ShapeTracker["Pattern"]], shape["Views"], ShapeViews[shape]], views];
         self
     ),
 
