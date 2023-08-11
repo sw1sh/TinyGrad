@@ -10,34 +10,38 @@ Class[
     TensorFunction,
     "Init"[self_, device_String, tensors___] :> (
         self["Device"] = device;
-        self["RequiresInputGrad"] = Through[{tensors}["RequiresGrad"]];
-        self["RequiresGrad"] = If[TrueQ[Or @@ self["RequiresInputGrad"]], True, If[MemberQ[self["RequiresInputGrad"], None], None, False]];
-        If[self["RequiresGrad"], self["Parents"] = {tensors}]
+        self["RequiresInputGradient"] = Through[{tensors}["RequiresGradient"]];
+        self["RequiresGradient"] = If[TrueQ[Or @@ self["RequiresInputGradient"]], True, If[MemberQ[self["RequiresInputGradient"], None], None, False]];
+        If[self["RequiresGradient"], self["Parents"] = {tensors}]
     ),
     "Forward"[self_, ___] :> Message[TensorFunction::noimpl, "Forward", self],
     "Backward"[self_, ___] :> Message[TensorFunction::noimpl, "Forward", self],
 
-    "Apply"[fxn_, xs : PatternSequence[x_, ___], args___] :> Block[{
+    "Apply"[fxn_, xs : PatternSequence[x_, ___], opts : OptionsPattern[]] :> Block[{
         ctx = fxn["New"[x["Device"], xs]], ret
     },
         ret = Tensor[
-            ctx["Forward"[Sequence @@ Through[{xs}["LazyData"]], args]],
+            ctx["Forward"[Sequence @@ Through[{xs}["LazyData"]], opts]],
             ctx["Device"],
-            ctx["RequiresGrad"]
+            ctx["RequiresGradient"]
         ];
-        If[ctx["RequiresGrad"] && ! Tensor["NoGradient"], ret["Context"] = ctx];
+        If[ctx["RequiresGradient"] && ! Tensor["NoGradient"], ret["Context"] = ctx];
         ret
-    ]
+    ],
+    "ClassMethods" -> {"Apply"}
 ]
 
 
 Class["Contiguous"[TensorFunction],
-    "Forward"[_, x_] :> x["Contiguous"],
+    "Forward"[_, x_] :> x["Contiguous"[]],
     "Backward"[_, x_] :> x
 ]
 
 Class["Cast"[TensorFunction],
-    "Forward"[self_, x_, type_] :> (self["InputType"] = type; x["Cast", type]),
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{type = OptionValue[{opts}, "Type"]},
+        self["InputType"] = type;
+        x["Cast"[type]]
+    ],
     "Backward"[self_, x_] :> x["Cast", self["InputType"]]
 ]
 

@@ -12,7 +12,7 @@ Class[LazyBuffer,
         self["Op"] = op;
         self
     ),
-    "Properties" -> {"Shape", "Key", "OpName"},
+    "Properties" -> {"Shape", "Key", "OpName", "Buffers"},
     "Shape"[self_] :> self["ShapeTracker"]["Shape"],
     "OpName"[self_] :> self["Op"]["Op"],
     "Key"[self_] :> {self["Type"], If[self["Realized"] =!= None, self["Realized"]["Key"], self["Op"]], self["ShapeTracker"]["Key"]}
@@ -101,11 +101,11 @@ RealizeCustom[buffer_::[LazyBuffer]] :=
 RealizeEmpty[buffer_::[LazyBuffer]] :=
     buffer["Realized"] = Device[buffer["Device"]]["Buffer"][Times @@ buffer["Shape"], buffer["Type"], Sequence @@ buffer["DeviceExtraArgs"]]
 
-ElementwiseOp[op_, srcs : PatternSequence[x_, ___], Shortest[arg : Except[_::[LazyBuffer]] : None]] := Wiht[{
+ElementwiseOp[op_, srcs : PatternSequence[x_, ___], arg : Except[_::[LazyBuffer]] : None] := With[{
     device = x["Device"], shape = x["Shape"],
     type = If[op === "CAST", Replace[arg, None :> Tensor["Type"]], Commonest[Through[{srcs}["Type"]]]]
 },
-    LazyBuffer[device, ShapeTracker[shape], LazyOp[op, srcs, arg], type]
+    LazyBuffer[device, ShapeTracker[shape], LazyOp[op, {srcs}, arg], type]
 ]
 
 DispatchLoadOp = <|

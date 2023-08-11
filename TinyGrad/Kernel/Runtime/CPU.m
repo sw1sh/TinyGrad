@@ -20,7 +20,7 @@ OpFunctionMap = <|
     "NOOP" -> Function[{x}, x],
     "EXP2" -> (2 ^ # &),
     "LOG2" -> Log2,
-    "CAST" -> Function[{x, type}, x["Cast"[type, "Copy" -> False]]],
+    "CAST" -> Function[{x, type}, x["Cast"[type]]],
     "SIN" -> Sin,
     "MAXIMUM" -> Max, "CMPEQ" -> Equal,
     "SQRT" -> Sqrt,

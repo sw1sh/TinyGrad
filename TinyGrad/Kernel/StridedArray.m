@@ -102,6 +102,11 @@ Class[StridedArray,
         self
     ],
 
+    "Cast"[self_, type_, OptionsPattern[Method -> "Coerce"]] :> Enclose[
+        self["Data"] = ConfirmBy[NumericArray[self["Data"], type, OptionValue[Method]], NumericArrayQ];
+        self["Type"] = type;
+    ],
+
     "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
     "Arange"[n_Integer ? NonNegative, shape : Shape | Automatic : Automatic] :>
         StridedArray[Range[n]] @ If[shape === Automatic, CoIdentity, "Reshape"[shape]]

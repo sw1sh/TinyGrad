@@ -56,7 +56,7 @@ Class[LazyOp,
     ]
 ]
 
-LazyOp[args___] := LazyOp["New"[args]]
+LazyOp[op : Op, args___] := LazyOp["New"[op, args]]
 
 
 Class[Interpreted,
