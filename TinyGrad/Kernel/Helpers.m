@@ -18,67 +18,54 @@ Interval /: QuotientRemainder[m_Interval, n_] := {Quotient[m, n], Mod[m, n]}
 Protect[Interval];
 
 
-
-SetAttributes[{TraceSteps, DelayedDefinition, DelayedBlock, DelayedBlockSteps}, HoldAll]
-
-$Debug = False;
+ClearAll[TraceSteps, DelayedDefinition, DelayedBlock]
+SetAttributes[{TraceSteps, DelayedDefinition, DelayedBlock}, HoldAll]
 
 TraceSteps[expr_, steps_Integer : 1, opts : OptionsPattern[TraceScan]] := Block[{count = 0, res},
 	res = TraceScan[
 		If[ count >= steps,
-			If[$Debug, EchoLabel["Finish"][InputForm[#]]]; Return[#, TraceScan],
-			If[$Debug, EchoLabel[count][InputForm[#]]]; count++;
+			Return[#, TraceScan],
+			count++;
 		] &,
 		expr,
 		opts,
 		TraceDepth -> 1
 	];
-	If[res === Unevaluated[expr], If[MatchQ[Unevaluated[expr], _HoldForm], expr, HoldForm[expr]], If[MatchQ[res, _HoldForm], res, HoldForm[Evaluate @ res]]]
-]
-
-DelayedBlockSteps[vars_, expr_, steps_Integer : 1, opts : OptionsPattern[TraceScan]] := Block[{count = 0},
-	TraceScan[
-		If[ count >= steps,
-			If[$Debug, EchoLabel["Finish"][InputForm[#]]]; Return[Block[vars, ReleaseHold @ #], TraceScan],
-			If[$Debug, EchoLabel[count][InputForm[#]]]; count++;
-		] &,
-		expr,
-		opts,
-		TraceDepth -> 1
-	]
+	If[res === Unevaluated[expr], HoldForm[expr], res]
 ]
 
 DelayedDefinition[vars_, expr_, steps_Integer : 1, opts : OptionsPattern[TraceSteps]] := Block[{count = 0, withExpr, blockExpr},
 	withExpr = TraceSteps[expr, steps, opts];
-	If[$Debug, EchoLabel["Before"] @ InputForm @ withExpr];
 	blockExpr = With[vars, Evaluate[withExpr]];
-	If[$Debug, EchoLabel["After"] @ InputForm @ blockExpr];
 	blockExpr
 ]
 
 DelayedBlock[a_, b_, expr_, args___] := Module[{c}, With[{tmp = DelayedDefinition[{a = c}, expr, args]},
 	If[ (* unevaluated *)
-		tmp === (HoldForm[expr] /. a -> c),
+		tmp === {} || tmp === (HoldForm[expr] /. HoldPattern[a] :> c),
 		expr,
 		(* recurse with default arguments *)
-		Function[Null, DelayedBlock[a, b, #], HoldAll] @@ (tmp /. c -> b)
+		Function[Null, DelayedBlock[a, b, #], HoldAll] @@ (tmp /. c :> b)
 	]
 ]]
 
 SetAttributes[InheritDefinitions, HoldAll]
 
-InheritDefinitions[a_ ? Developer`SymbolQ, b_ ? Developer`SymbolQ] := Module[{$Override = True},
+(*$UpValueBlock = True;*)
+
+InheritDefinitions[a_ ? Developer`SymbolQ, b_ ? Developer`SymbolQ] := (
 	(* Inherit DownValues and SubValues *)
 	b[args___] := DelayedBlock[a, b, a[args]];
 
-	(* Inherit FormatValues. Needs to handle some internal stuff, hopefull it won't change.
+	(* Inherit FormatValues. Needs TraceInternal and one more step to go deeper.
 		Evaluate on a parallel kernel, otherwise Trace doesn't work inside MakeBoxes for some mysterious reason *)
 	MakeBoxes[b, form___] ^:= Enclose @ ParallelEvaluate[
 		DelayedBlock[a, b, MakeBoxes[a, form], 2, TraceInternal -> True, TraceDepth -> Infinity],
-		ConfirmMatch[First[Kernels[], First @ LaunchKernels[1]], _KernelObject]
+		ConfirmMatch[First[Kernels[], First @ LaunchKernels[1, ProgressReporting -> None]], _KernelObject],
+		DistributedContexts -> Automatic
 	];
 
-	(* NValues is also tricky *)
+	(* NValues is also tricky as it evaluates its arguments *)
 	AppendTo[NValues[b], HoldPattern[N[b, args___]] :>
 		DelayedBlock[a, b, N[a, args], Evaluate[3 + Length[{args}]], TraceInternal -> True, TraceDepth -> Infinity]];
 
@@ -95,13 +82,26 @@ InheritDefinitions[a_ ? Developer`SymbolQ, b_ ? Developer`SymbolQ] := Module[{$O
 	(* Inherit the rest of UpValues only when they're actully defined
 		to avoid locking out functions that work with symbols, like Clear, Remove etc.
 	*)
-	head_[left___, b, right___] /;
-		MatchQ[
-			Unevaluated[head[left, a, right]],
+	(*expr : head_[___, b, ___] /; $UpValueBlock ^:= Block[{$UpValueBlock = False, newHoldExpr},
+		newHoldExpr = Hold[expr] /. HoldPattern[b] :> a;
+		Function[Null, Block[{$UpValueBlock = True}, DelayedBlock[a, b, #]], HoldAll] @@ newHoldExpr /;
+		Function[Null, MatchQ[
+			Unevaluated[#],
 			Alternatives @@ Keys @ UpValues[a]
-		] ^:= DelayedBlock[a, b, head[left, a, right]];
+		], HoldAll] @@ newHoldExpr
+	];*)
+	head_[left___, b, right___] /; MatchQ[
+		Unevaluated[head[left, a, right]],
+		Alternatives @@ Keys @ UpValues[a]
+	] ^:= DelayedBlock[a, b, head[left, a, right]];
+
+	(* Same for OwnValues *)
+	b /;
+		MatchQ[
+			Unevaluated[a],
+			Alternatives @@ Keys @ OwnValues[a]
+		] := a;
 
 	(* Attributes are copied, no way to inherit it that I know of *)
 	Attributes[b] = Attributes[a];
-]
-
+)

@@ -46,7 +46,7 @@ ShapeViews[shape_] := {View["New"[shape]]}
 Class[
     View,
 
-    "Init"[self_, shape_, initStrides_ : None, offset_ : 0, mask_ : None] :> Block[{
+    "$Init"[self_, shape_, initStrides_ : None, offset_ : 0, mask_ : None] :> Block[{
         stridesFromShape = ShapeStrides[shape],
         strides, contiguous
     },
@@ -61,7 +61,7 @@ Class[
         self
     ],
 
-    "Node"[self_, idx : Variable["Pattern"] | None : None] :> With[{
+    "Node"[self_, idx : Variable["$Type"] | None : None] :> With[{
         x = Replace[idx, None :> Variable["idx", 0, Times @@ self["Shape"] - 1]]
     },
         Total @ Fold[
@@ -82,7 +82,7 @@ Class[
             ]
     ],
 
-    "Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
+    "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "View",
         self,
         None,
@@ -113,7 +113,7 @@ MergeViews[view2_, view1_] := Block[{st, strides},
 ViewReshape[view_::[View], newShape : Shape] := Block[{
     shape, mask, strides, offset,
     pos, newPos,
-    newView, mergedView
+    newView, mergedView, newStrides, newMask
 },
     {shape, mask, strides, offset} = view /@ {"Shape", "Mask", "Strides", "Offset"};
     {pos, newPos} = Position[#, Except[1], {1}, Heads -> False] & /@ {shape, newShape};
@@ -144,8 +144,8 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
 
 Class[ShapeTracker,
 
-    "Init"[self_, shape : (_::[ShapeTracker]) | {___Integer}, views : {_::[View] ...} | None : None] :> (
-        self["Views"] = If[views === None, If[MatchQ[shape, ShapeTracker["Pattern"]], shape["Views"], ShapeViews[shape]], views];
+    "$Init"[self_, shape : (_::[ShapeTracker]) | {___Integer}, views : {_::[View] ...} | None : None] :> (
+        self["Views"] = If[views === None, If[MatchQ[shape, ShapeTracker["$Type"]], shape["Views"], ShapeViews[shape]], views];
         self
     ),
 
@@ -154,12 +154,23 @@ Class[ShapeTracker,
         idxs = Interval[{0, # - 1}] & /@ self["Shape"];
     ],
 
-    "Properties" -> {"ContiguousQ", "Shape"},
+    "$Properties" -> {"ContiguousQ", "Shape"},
 
     "ContiguousQ"[self_] :> Length[self["Views"]] == 1 && self["Views"][[1]]["ContiguousQ"],
     "Shape"[self_] :> self["Views"][[-1]]["Shape"],
 
-    "Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
+    "Permute"[self_, perm_] :> With[{view = self["Views"][[-1]]},
+        self["Views"] = ReplacePart[self["Views"],
+            -1 -> View[
+                view["Shape"][[perm]],
+                view["Strides"][[perm]],
+                view["Offset"],
+                If[view["Mask"] === None, None, view["Mask"][[perm]]]
+            ]
+        ]
+    ],
+
+    "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "ShapeTracker",
         self,
         None,

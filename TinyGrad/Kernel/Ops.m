@@ -24,17 +24,17 @@ $Ops = Join @@ Values[$OpTypes]
 
 Op = Alternatives @@ $Ops
 
-LazyOpQ = MatchQ[LazyOp["Pattern"]]
+LazyOpQ = MatchQ[LazyOp["$Type"]]
 
 Class[LazyOp,
-    "Init"[self_, op : Op, src_, arg_ : None] :> (
+    "$Init"[self_, op : Op, src_, arg_ : None] :> (
         self["Op"] = op;
         self["Source"] = src;
         self["Argument"] = arg;
         self["Buffers"] = Through[src["Buffers"]];
 
         Equal[left___, self, right___] ^:=
-            AllTrue[{left, right}, MatchQ[LoadOp["Pattern"]]] &&
+            AllTrue[{left, right}, MatchQ[LoadOp["$Type"]]] &&
             AllTrue[
                 SameQ @@ Through[{left, self, right}[#]] &,
                 {"Op", "Source", "Argument"}
@@ -42,7 +42,7 @@ Class[LazyOp,
         self
     ),
 
-    "Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
+    "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "LazyOp",
         self,
         None,
@@ -61,12 +61,12 @@ LazyOp[op : Op, args___] := LazyOp["New"[op, args]]
 
 Class[Interpreted,
 
-    "Init"[self_, buffer_, map : KeyValuePattern[Op -> _], fromLazyBuffer_ : Automatic, toBuffer_ : Automatic, fromBuffer_ : None] :> (
+    "$Init"[self_, buffer_, map : KeyValuePattern[Op -> _], fromLazyBuffer_ : Automatic, toUnderlying_ : Automatic, fromUnderlying_ : None] :> (
         self["Buffer"] = buffer;
         self["Map"] = map;
         self["FromLazyBuffer"] = Replace[fromLazyBuffer, Automatic -> Function[#["Realized"]]];
-        self["FromBuffer"] = If[fromBuffer === None, buffer, fromBuffer];
-        self["ToBuffer"] = Replace[toBuffer, Automatic -> Function[#["Buffer"]]];
+        self["FromUnderlying"] = If[fromUnderlying === None, buffer, fromUnderlying];
+        self["ToUnderlying"] = Replace[toUnderlying, Automatic -> Function[#["Data"]]];
         self["Synchronize"] = Function[None];
         self["CodeGen"] = None;
     ),
@@ -83,8 +83,8 @@ Class[Interpreted,
         newContext = If[context === None, <||>, context];
         sources = Map[If[LazyOpQ[#], self[Unevaluated @ "Execute"[#, None, newContext, args]], self["FromLazyBuffer"][#]] &, ast["Source"]];
         ConfirmAssert[KeyExistsQ[self["Map"], ast["Op"]], ast["Op"]];
-        ret = self["FromBuffer"][
-            self["Map"][ast["Op"]] @@ If[ast["Argument"] === None, Identity, Append[ast["Argument"]]][self["ToBuffer"] /@ sources]
+        ret = self["FromUnderlying"][
+            self["Map"][ast["Op"]] @@ If[ast["Argument"] === None, Identity, Append[ast["Argument"]]][self["ToUnderlying"] /@ sources]
         ];
         If[ context =!= None, context[ast] = ret];
         If[ output =!= None && output["OutputBuffer"] =!= None,

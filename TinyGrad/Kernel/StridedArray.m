@@ -25,7 +25,7 @@ $TypeByteCounts = <|
 
 Class[StridedArray,
 
-    "Init"[self_,
+    "$Init"[self_,
         initData : _ ? NumericArrayQ | _ ? NumericQ,
         initStrides : {___Integer} | Automatic : Automatic
     ] :> Enclose @ Block[{
@@ -54,11 +54,13 @@ Class[StridedArray,
         Transpose[self, args___] ^:= self["Extend"]["Transpose"[args]];
     ],
 
-    "Properties" -> {"TotalSize", "Normal"},
+    "$Properties" -> {"Dimension", "TotalSize", "$Normal"},
 
-    "TotalSize"[self_] :> Times @@ (self["Size"] * self["Shape"]),
+    "Dimension"[self_] :> Times @@ self["Shape"],
 
-    "Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
+    "TotalSize"[self_] :> self["Size"] * self["Dimension"],
+
+    "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "StridedArray",
         self,
         None,
@@ -84,7 +86,7 @@ Class[StridedArray,
 	        Array[FromRawPointer[pointer, Total[strides * ({##} - 1)]] &, shape]
         ]
     *)
-    "Normal"[self_] :> Enclose @ With[{pointer = self["Pointer"], shape = self["Shape"], strides = self["Strides"]},
+    "$Normal"[self_] :> Enclose @ With[{pointer = self["Pointer"], shape = self["Shape"], strides = self["Strides"]},
         ConfirmAssert[Length[shape] === Length[strides]];
         Array[RawMemoryRead[pointer, Total[strides ({##} - 1)]] &, shape]
     ],
@@ -102,14 +104,18 @@ Class[StridedArray,
         self
     ],
 
-    "Cast"[self_, type_, OptionsPattern[Method -> "Coerce"]] :> Enclose[
-        self["Data"] = ConfirmBy[NumericArray[self["Data"], type, OptionValue[Method]], NumericArrayQ];
-        self["Type"] = type;
-    ],
+    "Cast"[self_, type_, opts : OptionsPattern[]] :> cast[self, type, opts],
 
     "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
     "Arange"[n_Integer ? NonNegative, shape : Shape | Automatic : Automatic] :>
         StridedArray[Range[n]] @ If[shape === Automatic, CoIdentity, "Reshape"[shape]]
+]
+
+cast[self_, type_, OptionsPattern[{Method -> "Coerce"}]] := Enclose[
+    self["Size"] = ConfirmBy[$TypeByteCounts[type], IntegerQ];
+    self["Type"] = type;
+    self["Pointer"] = RawMemoryExport @ ConfirmBy[NumericArray[RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}], type, OptionValue[Method]], NumericArrayQ];
+    self
 ]
 
 StridedArray[data_, strides_ : Automatic] := Enclose @ StridedArray["New"[ConfirmBy[NumericArray[data], NumericArrayQ], strides]]

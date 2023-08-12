@@ -32,12 +32,13 @@ OpFunctionMap = <|
 |>
 
 Class[RawArrayBuffer[RawBuffer],
-    "Init"[self_ , size_, type_, buf_ : None] :> (
-        self["Class"]["Init"[size, type, If[buf === None, StridedArray["Empty"[size, type]], buf]]];
+    "$Init"[self_ , size_, type_, buf_ : None] :> (
+        RawBuffer["$Init"[self, size, type, If[buf === None, StridedArray["Empty"[size, type]], buf]]];
         self
     ),
-    "FromCPU"[cls_, x_ ? NumericArrayQ] :> cls["New"[Times @@ Dimensions[x], NumericArrayType[x], x]],
+    "FromCPU"[cls_, x_ ? NumericArrayQ] :> cls["New"[Times @@ Dimensions[x], NumericArrayType[x], StridedArray[x]]],
+    "FromCPU"[cls_, x_::[StridedArray]] :> cls["New"[x["Dimension"], x["Type"], x]],
     "ToCPU"[self_] :> self["Data"]
 ]
 
-CPUBuffer = Interpreted["New"[RawArrayBuffer, OpFunctionMap, Automatic, Automatic, StridedArrayBuffer["FromCPU"[##]] &], CPUBuffer]
+CPUBuffer = Interpreted["New"[RawArrayBuffer, OpFunctionMap, Automatic, Automatic, RawArrayBuffer @* "FromCPU"], CPUBuffer]

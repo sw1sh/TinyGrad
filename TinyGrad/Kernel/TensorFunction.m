@@ -8,7 +8,7 @@ General::noimpl = "Function `1` not implemented for `2`";
 
 Class[
     TensorFunction,
-    "Init"[self_, device_String, tensors___] :> (
+    "$Init"[self_, device_String, tensors___] :> (
         self["Device"] = device;
         self["RequiresInputGradient"] = Through[{tensors}["RequiresGradient"]];
         self["RequiresGradient"] = If[TrueQ[Or @@ self["RequiresInputGradient"]], True, If[MemberQ[self["RequiresInputGradient"], None], None, False]];
@@ -28,7 +28,7 @@ Class[
         If[ctx["RequiresGradient"] && ! Tensor["NoGradient"], ret["Context"] = ctx];
         ret
     ],
-    "ClassMethods" -> {"Apply"}
+    "$ClassMethods" -> {"Apply"}
 ]
 
 
@@ -42,12 +42,12 @@ Class["Cast"[TensorFunction],
         self["InputType"] = type;
         x["Cast"[type]]
     ],
-    "Backward"[self_, x_] :> x["Cast", self["InputType"]]
+    "Backward"[self_, x_] :> x["Cast"[self["InputType"]]]
 ]
 
 Class["Sin"[TensorFunction],
     "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp", "SIN"]),
-    "Backward"[self_, grad_] :> self["x"]["ConstLike", Pi / 2]["BinaryOp", "SUB", self["x"]]["UnaryOp", "SIN"]["BinaryOp", "MUL", grad]
+    "Backward"[self_, grad_] :> self["x"]["ConstLike"[Pi / 2]]["BinaryOp", "SUB", self["x"]]["UnaryOp", "SIN"]["BinaryOp", "MUL", grad]
 ]
 
 Class["Reshape"[TensorFunction],

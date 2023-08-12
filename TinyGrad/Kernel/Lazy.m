@@ -5,14 +5,14 @@ PackageExport[LazyBuffer]
 
 
 Class[LazyBuffer,
-    "Init"[self_, device_String, st_::[ShapeTracker], op_::[LazyOp], type_String, src_ : None] :> (
+    "$Init"[self_, device_String, st_::[ShapeTracker], op_::[LazyOp], type_String, src_ : None] :> (
         {self["ShapeTracker"], self["Device"], self["Op"], self["Type"], self["Realized"]} = {st, device, op, type, src};
         self["OutputBuffer"] = None;
         self["Children"] = {};
         self["Op"] = op;
         self
     ),
-    "Properties" -> {"Shape", "Key", "OpName", "Buffers"},
+    "$Properties" -> {"Shape", "Key", "OpName", "Buffers"},
     "Shape"[self_] :> self["ShapeTracker"]["Shape"],
     "OpName"[self_] :> self["Op"]["Op"],
     "Key"[self_] :> {self["Type"], If[self["Realized"] =!= None, self["Realized"]["Key"], self["Op"]], self["ShapeTracker"]["Key"]}
@@ -62,9 +62,17 @@ LazyBuffer["Contiguous"[self_]] := If[
     LazyBuffer[self["Device"], ShapeTracker[self["Shape"]], LazyOp["CONTIGUOUS", {self}], self["Type"]]
 ]
 
+LazyBuffer["Permute"[self_, perm_List]] := Block[{},
+
+    If[ perm === Range[Length[self["Shape"]]], Return[self]];
+    If[ self["Realized"] =!= None && self["OpName"] === "PERMUTE", Return[self["Op"]["Source"][[1]]["Permute"[self["Op"]["Argument"][[perm]]]]]];
+    (* TODO: Optimizations *)
+    LazyBuffer[self["Device"], self["ShapeTracker"]["Permute"[perm]], LazyOp["PERMUTE", {self}, perm], self["Type"]]
+]
+
 LazyBuffer["Buffers"[self_]] := {self}
 
-LazyBuffer["Format"[self_, form_]] :=
+LazyBuffer["$Format"[self_, form_]] :=
     BoxForm`ArrangeSummaryBox[
         "LazyBuffer",
         self,
@@ -86,7 +94,7 @@ RealizeContiguous[buffer_::[LazyBuffer]] := Block[{
 },
     If[
         buffer["Op"]["Source"][[1]]["ShapeTracker"]["ContiguousQ"] &&
-        realized["Class"] =!= RawConst &&
+        realized["$Class"] =!= RawConst &&
         realized["Size"] == Times @@ buffer["Shape"],
 
         buffer["Realized"] = realized,

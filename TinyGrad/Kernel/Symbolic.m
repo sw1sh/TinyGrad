@@ -6,7 +6,7 @@ PackageExport[Variable]
 
 
 Class[Node,
-    "Init"[self_, value_, min_, max_] :> (
+    "$Init"[self_, value_, min_, max_] :> (
         self["Value"] = value;
         self["Min"] = min;
         self["Max"] = max;
@@ -16,4 +16,4 @@ Class[Node,
     )
 ]
 
-Node /: Plus[left___, Node[x_], right___] := VariableSum[left, x, right]
+(* Node /: Plus[left___, Node[x_], right___] := VariableSum[left, x, right] *)

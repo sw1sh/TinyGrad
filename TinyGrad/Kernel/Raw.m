@@ -5,14 +5,15 @@ PackageExport[RawBuffer]
 
 
 Class[RawBuffer,
-    "Init"[self_, size_, type_String, data_ : None] :> (
+    "$Init"[self_, size_, type_String, data_ : None] :> (
         self["Size"] = size;
         self["Type"] = type;
         self["Data"] = data;
         self["MemorySize"] = size * $TypeByteCounts[type];
+        self
     ),
 
-    "Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
+    "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "RawBuffer",
         self,
         None,
@@ -24,7 +25,7 @@ Class[RawBuffer,
         {{}},
         form
     ],
-    "ClassMethods" -> {"FromCPU"}
+    "$ClassMethods" -> {"FromCPU"}
 ]
 
 RawBuffer[args___] := RawBuffer["New"[args]]

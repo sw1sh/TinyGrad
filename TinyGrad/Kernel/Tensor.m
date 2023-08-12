@@ -20,7 +20,7 @@ Tensor[data : TensorData,
 
 Tensor[data : TensorData, OptionsPattern[]] := Tensor["New"[data, Sequence @@ OptionValue[Keys[Options[Tensor]]]]]
 
-Tensor @ "Init"[
+Tensor @ "$Init"[
     self_,
     initData : TensorData,
     device : _String | None : None,
@@ -30,12 +30,12 @@ Tensor @ "Init"[
     data = initData,
     type = Replace[initType, None :> Tensor["Type"]]
 },
-    If[ data["Class"] === Tensor, Return[data]];
+    If[ data["$Class"] === Tensor, Return[data]];
     self["Gradient"] = None;
     self["RequiresGradient"] = requiresGradient;
     self["Context"] = None;
 
-    If[ data["Class"] === LazyBuffer,
+    If[ data["$Class"] === LazyBuffer,
         ConfirmAssert[initType === None || type === data["Type"]];
         self["LazyData"] = If[data["Device"] === device, data, data["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
         Return[self]
@@ -59,7 +59,7 @@ Tensor @ "Init"[
     |>]
 ]
 
-Tensor["Properties"] = {"Device", "Shape", "Type", "Normal"}
+Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal"}
 
 Tensor[(prop : "Device" | "Shape" | "Type")[self_]] := self["LazyData"][prop]
 
@@ -77,7 +77,7 @@ Tensor["Assign"[self_, x_]] := Enclose @ Block[{tensor = Tensor[x, "Type" -> sel
 
 Tensor["Detach"[self_]] := Tensor[self["LazyData"], self["Device"], False]
 
-Tensor["Normal"[self_]] := self["LazyData"]["ToCPU"[]]
+Tensor["$Normal"[self_]] := self["LazyData"]["ToCPU"[]]
 
 Tensor["To"[self_, device_]] := With[{ret = Tensor[self["LazyData"], device]},
     If[ret["Gradient"] =!= None, ret["Gradient"]["To"[device]]];
@@ -92,7 +92,7 @@ Tensor["Eye"[dim_Integer ? Positive, args___]] := Tensor[{1}, args] @* "Pad"[{{0
 
 Tensor["MatMul"[self_, x_Tensor, reverse_ : False]] := If[reverse, x . self, self . x]
 
-Tensor["Format"[self_, form_]] :=
+Tensor["$Format"[self_, form_]] :=
     BoxForm`ArrangeSummaryBox[
         "Tensor",
         self,
