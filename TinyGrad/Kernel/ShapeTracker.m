@@ -10,6 +10,9 @@ PackageScope[Dimension]
 PackageScope[Size]
 PackageScope[Shape]
 PackageScope[Strides]
+PackageScope[mergeShapeStrides]
+
+PackageImport["Wolfram`Class`"]
 
 
 
@@ -40,7 +43,7 @@ ContiguousQ[shape : Shape, strides : Strides] := And @@ MapThread[#2 == #3 || #1
 FilterStrides[shape : Shape, strides : Strides] := MapThread[If[#2 == 1, 0, #1] &, {strides, shape}]
 
 
-ShapeViews[shape_] := {View["New"[shape]]}
+ShapeViews[shape_] := {View["$New"[shape]]}
 
 
 Class[
@@ -50,7 +53,7 @@ Class[
         stridesFromShape = ShapeStrides[shape],
         strides, contiguous
     },
-        strides = If[initStrides === None, stridesFromShape, FilterStrides[shape, strides]];
+        strides = If[initStrides === None, stridesFromShape, FilterStrides[shape, initStrides]];
         contiguous = offset == 0 && ContiguousQ[shape, strides] && mask === None;
         self["Shape"] = shape;
         self["Strides"] = strides;
@@ -100,12 +103,12 @@ Class[
 ]
 
 View[shape_, initStrides_ : None, offset_ : 0, mask_ : None] :=
-    View @ "New"[shape, initStrides, offset, mask]
+    View @ "$New"[shape, initStrides, offset, mask]
 
 MergeViews[view2_, view1_] := Block[{st, strides},
     If[view2["Mask"] =!= None, Return[None]];
     st = ShapeTracker[view1["Shape"], {view2, view1}];
-    strides = st["RealStrides"];
+    strides = st["RealStrides"[]];
     If[MemberQ[strides, None], Return[None]];
     View[view1["Shape"], strides, st["RealOffset"], view1["Mask"]]
 ]
@@ -122,8 +125,10 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
             Replace[newShape, 1 -> 0, {1}],
             Thread[newPos -> Extract[strides, pos]]
         ];
-        If[ mask =!= None,
-            newMask = If[
+        newMask = If[
+            mask === None,
+            None,
+            If[
                 MemberQ[Thread[{shape, mask}], {1, Except[{0, 1}]}],
                 ConstantArray[{0, 0}, Length[newShape]],
                 ReplacePart[
@@ -132,7 +137,7 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
                 ]
             ]
         ];
-        Return[{View[newShape, newStrides, offset], False}]
+        Return[{View[newShape, newStrides, offset, newMask], False}]
     ];
     newView = View[newShape, ShapeStrides[newShape]];
     If[view["ContiguousQ"], Return[{newView, False}]];
@@ -142,6 +147,26 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
 ]
 
 
+shapesCompatibleQ[{l_, ls___}, {r_, rs___}] := Which[Divisible[l, r], shapesCompatibleQ[{l / r, ls}, {rs}], Divisible[r, l], shapesCompatibleQ[{ls}, {r / l, rs}], True, False]
+shapesCompatibleQ[{1}, {}] := True
+shapesCompatibleQ[{}, {1}] := True
+shapesCompatibleQ[{}, {}] := True
+shapesCompatibleQ[_, _] := False
+
+mergeShapeStrides[ss_] := FixedPoint[
+	SequenceReplace[
+		s : {{shape1_, strides_}, {shape2_, _}} /; shapesCompatibleQ[shape2, shape1[[Reverse @ Ordering[strides]]]] :> {
+			shape1,
+			Fold[
+                IntegerDigits[#1, MixedRadix[#2[[1]]], Length[#2[[1]]]] . #2[[2]] &,
+                FromDigits[UnitVector[Length[shape1], #], MixedRadix[shape1]],
+                s
+            ] & /@ Range[Length[shape1]]
+		}
+	],
+	ss
+]
+
 Class[ShapeTracker,
 
     "$Init"[self_, shape : (_::[ShapeTracker]) | {___Integer}, views : {_::[View] ...} | None : None] :> (
@@ -149,25 +174,43 @@ Class[ShapeTracker,
         self
     ),
 
-    "RealStrides"[self_, ignoreValid : False] :> Block[{idxs},
+    (* "RealStrides"[self_, ignoreValid : False] :> Block[{idxs},
         If[Length[self["Views"]] == 1 && self["Views"][[-1]]["Mask"] === None, Return[self["Views"][[-1]]["Strides"]]];
         idxs = Interval[{0, # - 1}] & /@ self["Shape"];
-    ],
+        self["Views"][[-1]]["Shape"]
+    ], *)
 
     "$Properties" -> {"ContiguousQ", "Shape"},
 
     "ContiguousQ"[self_] :> Length[self["Views"]] == 1 && self["Views"][[1]]["ContiguousQ"],
     "Shape"[self_] :> self["Views"][[-1]]["Shape"],
 
-    "Permute"[self_, perm_] :> With[{view = self["Views"][[-1]]},
+    "Permute"[self_, perm_Cycles] :> With[{view = self["Views"][[-1]]},
         self["Views"] = ReplacePart[self["Views"],
             -1 -> View[
-                view["Shape"][[perm]],
-                view["Strides"][[perm]],
+                Permute[view["Shape"], perm],
+                Permute[view["Strides"], perm],
                 view["Offset"],
-                If[view["Mask"] === None, None, view["Mask"][[perm]]]
+                If[view["Mask"] === None, None, Permute[view["Mask"], perm]]
             ]
         ]
+    ],
+    "Permute"[self_, perm_List] :> self["Permute"[FindPermutation[perm]]],
+
+    "Reshape"[self_, shape : Shape] :> Enclose[
+        ConfirmAssert[Times @@ shape == Times @@ self["Shape"]];
+        With[{
+            merge = mergeShapeStrides[{
+                {shape, ShapeStrides[shape]},
+                {self["Views"][[-1]]["Shape"], self["Views"][[-1]]["Strides"]}
+            }]
+        },
+            If[ Length[merge] == 1,
+                self["Views"] = ReplacePart[self["Views"], -1 -> View @@ merge],
+                self["Views"] = Append[self["Views"], View @@ merge[[1]]]
+            ]
+        ];
+        self
     ],
 
     "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
@@ -185,5 +228,5 @@ Class[ShapeTracker,
     ]
 ]
 
-ShapeTracker[shape_, views_ : None] := ShapeTracker["New"[shape, views]]
+ShapeTracker[shape_, views_ : None] := ShapeTracker["$New"[shape, views]]
 

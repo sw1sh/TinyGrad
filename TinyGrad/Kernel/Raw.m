@@ -2,6 +2,8 @@ Package["TinyGrad`"]
 
 PackageExport[RawBuffer]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 Class[RawBuffer,
@@ -25,8 +27,9 @@ Class[RawBuffer,
         {{}},
         form
     ],
-    "$ClassMethods" -> {"FromCPU"}
+    "$ClassMethods" -> {"FromCPU"},
+    "$Normal"[self_] :> Normal[self["ToCPU"[]]],
 ]
 
-RawBuffer[args___] := RawBuffer["New"[args]]
+RawBuffer[args___] := RawBuffer["$New"[args]]
 

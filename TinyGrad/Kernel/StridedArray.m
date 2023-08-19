@@ -4,6 +4,8 @@ PackageExport[StridedArray]
 PackageExport[ShapeStrides]
 PackageExport[$TypeByteCounts]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 $TypeByteCounts = <|
@@ -51,7 +53,7 @@ Class[StridedArray,
         self["Shape"] = shape;
         self["Strides"] = strides;
 
-        Transpose[self, args___] ^:= self["Extend"]["Transpose"[args]];
+        Transpose[self, args___] ^:= self["$Extend"]["Transpose"[args]];
     ],
 
     "$Properties" -> {"Dimension", "TotalSize", "$Normal"},
@@ -91,24 +93,55 @@ Class[StridedArray,
         Array[RawMemoryRead[pointer, Total[strides ({##} - 1)]] &, shape]
     ],
 
-    "Transpose"[self_, list_ : {2, 1}] :> With[{perm = FindPermutation[list]},
+    "Transpose"[self_, list_List : {2, 1}] :> (self["Transpose"[FindPermutation[list]]]; self),
+    "Transpose"[self_, perm_Cycles] :> (
         self["Shape"] = Permute[self["Shape"], perm];
         self["Strides"] = Permute[self["Strides"], perm];
         self
-    ],
+    ),
 
-    "Reshape"[self_, shape : Shape] :> Enclose[
-        ConfirmAssert[Times @@ shape == Times @@ self["Shape"]];
-        self["Shape"] = shape;
-        (* self["Strides"] =  *)
-        self
-    ],
+    "Reshape"[self_, shape : Shape] :> reshape[self @ "$Extend", shape],
 
-    "Cast"[self_, type_, opts : OptionsPattern[]] :> cast[self, type, opts],
+    "Cast"[self_, type_, opts : OptionsPattern[]] :> cast[self @ "$Extend", type, opts],
 
     "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
-    "Arange"[n_Integer ? NonNegative, shape : Shape | Automatic : Automatic] :>
-        StridedArray[Range[n]] @ If[shape === Automatic, CoIdentity, "Reshape"[shape]]
+    "Arange"[n : _Integer ? NonNegative | Automatic : Automatic, shape : Shape | Automatic : Automatic] :> With[{dim = Times @@ shape},
+        StridedArray[ArrayReshape[PadRight[Range @ Replace[n, Automatic -> dim], dim], shape], ShapeStrides[shape]]
+    ]
+]
+
+PrimeReshape[shape_, strides_ : None] := Block[{factors = Sow[FactorInteger /@ shape], primeShape},
+    primeShape = Catenate[Table @@@ Catenate[factors]];
+    If[strides === None, Return[primeShape]];
+	{
+        primeShape,
+        Catenate @ MapThread[ShapeStrides[Catenate[Table @@@ #2], #1] &, {strides, factors}]
+    }
+]
+
+PrimeReshape[a_::[StridedArray]] := (
+	{a["Shape"], a["Strides"]} = PrimeReshape[a["Shape"], a["Strides"]]
+	a
+)
+
+reshape[self_, shape_] := Enclose @ Block[{strides, merge},
+    ConfirmAssert[self["Dimension"] == Times @@ shape];
+    stides = ShapeStrides[shape];
+    merge = mergeShapeStrides[{{shape, stides}, {self["Shape"], self["Strides"]}}];
+    self["Shape"] = shape;
+    If[ Length[merge] == 1,
+        self["Strides"] = merge[[1, 2]],
+
+        self["Strides"] = stides;
+        self["Pointer"] = RawMemoryExport @ ConfirmBy[
+            NumericArray[
+                RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}],
+                self["Type"]
+            ],
+            NumericArrayQ
+        ];
+    ];
+    self
 ]
 
 cast[self_, type_, OptionsPattern[{Method -> "Coerce"}]] := Enclose[
@@ -118,5 +151,5 @@ cast[self_, type_, OptionsPattern[{Method -> "Coerce"}]] := Enclose[
     self
 ]
 
-StridedArray[data_, strides_ : Automatic] := Enclose @ StridedArray["New"[ConfirmBy[NumericArray[data], NumericArrayQ], strides]]
+StridedArray[data_, strides_ : Automatic] := Enclose @ StridedArray["$New"[ConfirmBy[NumericArray[data], NumericArrayQ], strides]]
 

@@ -2,6 +2,8 @@ Package["TinyGrad`"]
 
 PackageExport[LazyBuffer]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 Class[LazyBuffer,
@@ -20,7 +22,7 @@ Class[LazyBuffer,
 
 
 LazyBuffer[device_, shapeTracker_, op_, type_, src_ : None] :=
-    LazyBuffer["New"[
+    LazyBuffer["$New"[
         device,
         shapeTracker,
         op,
@@ -31,9 +33,12 @@ LazyBuffer[device_, shapeTracker_, op_, type_, src_ : None] :=
 LazyBuffer["Realize"[self_]] := (
     If[ self["Realized"] === None,
         If[ MemberQ[$LoadOps, self["OpName"]],
-            DispatchLoadOp[self["OpName"]][self],
+            DispatchLoadOp[self["OpName"]][self]
+        ];
+        If[ self["Realized"] === None,
+            Scan[# @ "Reallize"[] &, self["Buffers"]];
             self["Realized"] = Device[self["Device"]]["Execute"[self["Op"], self]]
-        ]
+        ];
     ];
     self
 )
@@ -67,8 +72,16 @@ LazyBuffer["Permute"[self_, perm_List]] := Block[{},
     If[ perm === Range[Length[self["Shape"]]], Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "PERMUTE", Return[self["Op"]["Source"][[1]]["Permute"[self["Op"]["Argument"][[perm]]]]]];
     (* TODO: Optimizations *)
-    LazyBuffer[self["Device"], self["ShapeTracker"]["Permute"[perm]], LazyOp["PERMUTE", {self}, perm], self["Type"]]
+    LazyBuffer[self["Device"], self["ShapeTracker"] @* "$Extend" @* "Permute"[perm], LazyOp["PERMUTE", {self}, perm], self["Type"]]
 ]
+
+LazyBuffer["Reshape"[self_, shape_]] := (
+    If[ shape === self["Shape"], Return[self]];
+    If[ self["Realized"] =!= None && self["OpName"] === "RESHAPE",
+        Return[self["Op"]["Source"][[1]]["Reshape"[shape]]]
+    ];
+    LazyBuffer[self["Device"], self["ShapeTracker"] @* "$Extend" @* "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
+)
 
 LazyBuffer["Buffers"[self_]] := {self}
 
@@ -80,9 +93,10 @@ LazyBuffer["$Format"[self_, form_]] :=
         {
             BoxForm`SummaryItem[{"Shape: ", self["Shape"]}],
             BoxForm`SummaryItem[{"Type: ", self["Type"]}],
-            BoxForm`SummaryItem[{"Op: ", self["Op"]}]
+            BoxForm`SummaryItem[{"Op: ", self["Op"]}],
+            BoxForm`SummaryItem[{"Realized: ", self["Realized"] =!= None}]
         },
-        {{BoxForm`SummaryItem[{"Realized: ", self["Realized"] =!= None}]}},
+        {{}},
         form
     ]
 
@@ -99,7 +113,7 @@ RealizeContiguous[buffer_::[LazyBuffer]] := Block[{
 
         buffer["Realized"] = realized,
 
-        buffer["Op"] = LazyOp["New"["NOOP", buffer["Op"]["Source"]]]
+        buffer["Op"] = LazyOp["$New"["NOOP", buffer["Op"]["Source"]]]
     ]
 ]
 

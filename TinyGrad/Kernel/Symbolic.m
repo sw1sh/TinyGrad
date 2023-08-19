@@ -3,6 +3,8 @@ Package["TinyGrad`"]
 PackageExport[Node]
 PackageExport[Variable]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 Class[Node,

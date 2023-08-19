@@ -2,6 +2,8 @@ Package["TinyGrad`"]
 
 PackageExport[TensorFunction]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 General::noimpl = "Function `1` not implemented for `2`";
@@ -15,10 +17,10 @@ Class[
         If[self["RequiresGradient"], self["Parents"] = {tensors}]
     ),
     "Forward"[self_, ___] :> Message[TensorFunction::noimpl, "Forward", self],
-    "Backward"[self_, ___] :> Message[TensorFunction::noimpl, "Forward", self],
+    "Backward"[self_, ___] :> Message[TensorFunction::noimpl, "Backward", self],
 
     "Apply"[fxn_, xs : PatternSequence[x_, ___], opts : OptionsPattern[]] :> Block[{
-        ctx = fxn["New"[x["Device"], xs]], ret
+        ctx = fxn["$New"[x["Device"], xs]], ret
     },
         ret = Tensor[
             ctx["Forward"[Sequence @@ Through[{xs}["LazyData"]], opts]],
@@ -32,12 +34,12 @@ Class[
 ]
 
 
-Class["Contiguous"[TensorFunction],
+Class["Contiguous" -> TensorFunction,
     "Forward"[_, x_] :> x["Contiguous"[]],
     "Backward"[_, x_] :> x
 ]
 
-Class["Cast"[TensorFunction],
+Class["Cast" -> TensorFunction,
     "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{type = OptionValue[{opts}, "Type"]},
         self["InputType"] = type;
         x["Cast"[type]]
@@ -45,30 +47,33 @@ Class["Cast"[TensorFunction],
     "Backward"[self_, x_] :> x["Cast"[self["InputType"]]]
 ]
 
-Class["Sin"[TensorFunction],
+Class["Sin" -> TensorFunction,
     "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp", "SIN"]),
     "Backward"[self_, grad_] :> self["x"]["ConstLike"[Pi / 2]]["BinaryOp", "SUB", self["x"]]["UnaryOp", "SIN"]["BinaryOp", "MUL", grad]
 ]
 
-Class["Reshape"[TensorFunction],
-    "Forward"[self_, x_, shape_] :> (self["InputShape"] = x["Shape"]; x @ "Reshape"[shape]),
+Class["Reshape" -> TensorFunction,
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{shape = OptionValue[{opts}, "Shape"]},
+        self["InputShape"] = x["Shape"];
+        x @ "Reshape"[shape]
+    ],
     "Backward"[self_, grad_] :> grad @ "Reshape"[self["InputShape"]]
 ]
 
-Class["Permute"[TensorFunction],
+Class["Permute" -> TensorFunction,
     "Forward"[self_, x_, order_] :> (self["InputOrder"] = x[order]; x @ "Permute"[order]),
     "Backward"[self_, grad_] :> grad @ "Permute"[Sort[self["InputOrder"]]]
 ]
 
-Class["Pad"[TensorFunction],
-    "Forward"[self_, x_, pad : {{_Integer, _Integer} ...}] :> (
+Class["Pad" -> TensorFunction,
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{pad = OptionValue[{opts}, "Padding"]},
         self["Padding"] = MapThread[#2[[1]] + {0, #1} &, {x["Shape"], pad}];
         x @ "Pad"[pad]
-    ),
+    ],
     "Backward"[self_, grad_] :> grad @ "Shrink"[self["Padding"]]
 ]
 
-Class["Shrink"[TensorFunction],
+Class["Shrink" -> TensorFunction,
     "Forward"[self_, x_, shrink : {{_Integer, _Integer} ...}] :> (
         self["Padding"] = MapThread[{0, #1}  + {1, -1} * #2 &, {x["Shape"], shrink}];
         x @ "Shrink"[shrink]

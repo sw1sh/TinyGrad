@@ -4,6 +4,8 @@ PackageImport["ForeignFunctionInterface`LibFFI`"]
 
 PackageExport[TypeByteCount]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 DeclareCompiledComponent[

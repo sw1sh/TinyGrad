@@ -3,6 +3,8 @@ Package["TinyGrad`"]
 PackageExport[RawArrayBuffer]
 PackageExport[CPUBuffer]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 ShapeToAxis[oldShape : Shape, newShape : Shape] := Enclose[
@@ -31,14 +33,14 @@ OpFunctionMap = <|
     "WHERE" -> Function[Null, #1["Where"[##2]]]
 |>
 
-Class[RawArrayBuffer[RawBuffer],
+Class[RawArrayBuffer -> RawBuffer,
     "$Init"[self_ , size_, type_, buf_ : None] :> (
         RawBuffer["$Init"[self, size, type, If[buf === None, StridedArray["Empty"[size, type]], buf]]];
         self
     ),
-    "FromCPU"[cls_, x_ ? NumericArrayQ] :> cls["New"[Times @@ Dimensions[x], NumericArrayType[x], StridedArray[x]]],
-    "FromCPU"[cls_, x_::[StridedArray]] :> cls["New"[x["Dimension"], x["Type"], x]],
-    "ToCPU"[self_] :> self["Data"]
+    "FromCPU"[cls_, x_ ? NumericArrayQ] :> cls["$New"[Times @@ Dimensions[x], NumericArrayType[x], StridedArray[x]]],
+    "FromCPU"[cls_, x_::[StridedArray]] :> cls["$New"[x["Dimension"], x["Type"], x]],
+    "ToCPU"[self_] :> Normal[self["Data"]]
 ]
 
-CPUBuffer = Interpreted["New"[RawArrayBuffer, OpFunctionMap, Automatic, Automatic, RawArrayBuffer @* "FromCPU"], CPUBuffer]
+CPUBuffer = Interpreted["$New"[RawArrayBuffer, OpFunctionMap, Automatic, Automatic, RawArrayBuffer @* "FromCPU"], CPUBuffer]

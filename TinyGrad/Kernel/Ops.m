@@ -8,8 +8,12 @@ PackageScope[$BinaryOps]
 PackageScope[$ReduceOps]
 PackageScope[$TernaryOps]
 PackageScope[$LoadOps]
+PackageScope[$MovementOps]
 PackageScope[$OpTypes]
 PackageScope[$Ops]
+
+PackageImport["Wolfram`Class`"]
+
 
 
 $UnaryOps = {"NOOP", "EXP2", "LOG2", "CAST", "SIN", "SQRT", "RECIP"}
@@ -17,9 +21,9 @@ $BinaryOps = {"ADD", "SUB", "MUL", "DIV", "CMPEQ", "MAXIMUM", "MOD", "CMPLT"}
 $ReduceOps = {"SUM", "MAX"}
 $TernaryOps = {"MULACC", "WHERE"}
 $LoadOps = {"EMPTY", "RAND", "CONST", "FROM", "CONTIGUOUS", "CUSTOM"}
+$MovementOps = {"RESHAPE", "PERMUTE", "EXPAND", "PAD", "SHRINK", "STRIDE"}
 
-
-$OpTypes = {"Unary" -> $UnaryOps, "Binary" -> $BinaryOps, "Reduce" -> $ReduceOps, "Ternary" -> $TernaryOps, "Load" -> $LoadOps}
+$OpTypes = {"Unary" -> $UnaryOps, "Binary" -> $BinaryOps, "Reduce" -> $ReduceOps, "Ternary" -> $TernaryOps, "Load" -> $LoadOps, "Movement" -> $MovementOps}
 $Ops = Join @@ Values[$OpTypes]
 
 Op = Alternatives @@ $Ops
@@ -31,7 +35,6 @@ Class[LazyOp,
         self["Op"] = op;
         self["Source"] = src;
         self["Argument"] = arg;
-        self["Buffers"] = Through[src["Buffers"]];
 
         Equal[left___, self, right___] ^:=
             AllTrue[{left, right}, MatchQ[LoadOp["$Type"]]] &&
@@ -41,6 +44,9 @@ Class[LazyOp,
             ];
         self
     ),
+    "$Properties" -> {"Buffers"},
+
+    "Buffers"[self_] :> Catenate[Through[self["Source"]["Buffers"]]],
 
     "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "LazyOp",
@@ -56,7 +62,7 @@ Class[LazyOp,
     ]
 ]
 
-LazyOp[op : Op, args___] := LazyOp["New"[op, args]]
+LazyOp[op : Op, args___] := LazyOp["$New"[op, args]]
 
 
 Class[Interpreted,

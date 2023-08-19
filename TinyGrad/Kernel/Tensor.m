@@ -2,6 +2,8 @@ Package["TinyGrad`"]
 
 PackageExport[Tensor]
 
+PackageImport["Wolfram`Class`"]
+
 
 
 Class[Tensor, "Training" -> False, "NoGradient" -> False, "Type" -> "Real32"]
@@ -18,7 +20,7 @@ Tensor[data : TensorData,
 ] :=
     Tensor[data, opts, "Device" -> device, "Type" -> type, "RequiresGradient" -> requiresGradient]
 
-Tensor[data : TensorData, OptionsPattern[]] := Tensor["New"[data, Sequence @@ OptionValue[Keys[Options[Tensor]]]]]
+Tensor[data : TensorData, OptionsPattern[]] := Tensor["$New"[data, Sequence @@ OptionValue[Keys[Options[Tensor]]]]]
 
 Tensor @ "$Init"[
     self_,
@@ -59,9 +61,11 @@ Tensor @ "$Init"[
     |>]
 ]
 
-Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal"}
+Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Dimension"}
 
 Tensor[(prop : "Device" | "Shape" | "Type")[self_]] := self["LazyData"][prop]
+
+Tensor["Dimension"[self_]] := Times @@ self["Shape"]
 
 Tensor["Realize"[self_]] := (self["LazyData"]["Realize"[]]; self)
 
@@ -84,8 +88,12 @@ Tensor["To"[self_, device_]] := With[{ret = Tensor[self["LazyData"], device]},
     ret
 ]
 
+
+Tensor["Reshape"[self_, shape_]] := TensorFunction["Reshape"] @ "Apply"[self, "Shape" -> Replace[shape, -1 :> - self["Dimension"] / Times @@ shape, {1}]]
+
 Tensor["Pad"[self_, pad : {{_Integer, _Integer} ...}, value_ : 0]] :=
-    TensorFunction["Pad"] @ "Apply"[self, pad]
+    TensorFunction["Pad"] @ "Apply"[self, "Padding" -> pad]
+
 
 Tensor["Eye"[dim_Integer ? Positive, args___]] := Tensor[{1}, args] @* "Pad"[{{0, dim}}] @* "Reshape"[1, dim + 1] @* "Expand"[dim, dim + 1] @* "Reshape"[dim * (dim + 1)] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[dim, dim]
 
