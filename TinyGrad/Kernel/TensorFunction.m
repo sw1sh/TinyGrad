@@ -47,9 +47,42 @@ Class["Cast" -> TensorFunction,
     "Backward"[self_, x_] :> x["Cast"[self["InputType"]]]
 ]
 
+Class["Add" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> x + y,
+    "Backward"[self_, grad_] :> {If[self["RequiresInputGradient"][[1]], grad, None], If[self["RequiresInputGradient"][[2]], grad, None]}
+]
+
+Class["Sub" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> (x - y),
+    "Backward"[self_, grad_] :> {If[self["RequiresInputGradient"][[1]], grad, None], If[self["RequiresInputGradient"][[2]], -grad, None]}
+]
+
+Class["Mul" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> (self["x"] = x; self["y"] = y; x * y),
+    "Backward"[self_, grad_] :> {If[self["RequiresInputGradient"][[1]], grad * self["y"], None], If[self["RequiresInputGradient"][[2]], grad * self["x"], None]}
+]
+
+Class["Div" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> (self["x"] = x; self["y"] = y; x / y),
+    "Backward"[self_, grad_] :> {If[self["RequiresInputGradient"][[1]], grad / self["y"], None], If[self["RequiresInputGradient"][[2]], - grad * self["x"] / self["y"] ^ 2, None]}
+]
+
+Class["Pow" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> (self["x"] = x; self["y"] = y; x ^ y),
+    "Backward"[self_, grad_] :> {If[self["RequiresInputGradient"][[1]], grad * self["y"] * self["x"] ^ (self["y"] - 1), None], If[self["RequiresInputGradient"][[2]], grad * Log[self["x"]] * self["x"] ^ self["y"], None]}
+]
+
 Class["Sin" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp", "SIN"]),
-    "Backward"[self_, grad_] :> self["x"]["ConstLike"[Pi / 2]]["BinaryOp", "SUB", self["x"]]["UnaryOp", "SIN"]["BinaryOp", "MUL", grad]
+    "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp"["SIN"]]),
+    "Backward"[self_, grad_] :> (self["x"]["ConstLike"[Pi / 2]] - self["x"])["UnaryOp"["SIN"]] * grad
+]
+
+Class["Sum" -> TensorFunction,
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{lvl = OptionValue[{opts}, "Level"]},
+        self["InputShape"] = x["Shape"];
+        x["ReduceOp"["SUM", lvl]]
+    ],
+    "Backward"[self_, grad_] :> grad["Expand"[self["InputShape"]]]
 ]
 
 Class["Reshape" -> TensorFunction,
@@ -58,6 +91,14 @@ Class["Reshape" -> TensorFunction,
         x @ "Reshape"[shape]
     ],
     "Backward"[self_, grad_] :> grad @ "Reshape"[self["InputShape"]]
+]
+
+Class["Expand" -> TensorFunction,
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{shape = OptionValue[{opts}, "Shape"]},
+        self["InputShape"] = x["Shape"];
+        x @ "Expand"[shape]
+    ],
+    "Backward"[self_, grad_] :> grad @ "ReduceOp"["SUM", self["InputShape"]]
 ]
 
 Class["Permute" -> TensorFunction,

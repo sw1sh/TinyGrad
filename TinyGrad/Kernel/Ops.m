@@ -54,10 +54,9 @@ Class[LazyOp,
         None,
         {
             BoxForm`SummaryItem[{"Op: ", self["Op"]}],
-            BoxForm`SummaryItem[{"Source: ", self["Source"]}],
-            BoxForm`SummaryItem[{"Argument: ", self["Argument"]}]
+            If[self["Argument"] === None, Nothing, BoxForm`SummaryItem[{"Argument: ", self["Argument"]}]]
         },
-        {{}},
+        {BoxForm`SummaryItem[{"Source: ", Labeled[#["Op"], Row[{"Realized: ", #["RealizedQ"]}]] & /@ self["Source"]}]},
         form
     ]
 ]
@@ -89,7 +88,7 @@ Class[Interpreted,
         newContext = If[context === None, <||>, context];
         sources = Map[If[LazyOpQ[#], self[Unevaluated @ "Execute"[#, None, newContext, args]], self["FromLazyBuffer"][#]] &, ast["Source"]];
         ConfirmAssert[KeyExistsQ[self["Map"], ast["Op"]], ast["Op"]];
-        ret = self["FromUnderlying"][
+        ret = Confirm @ self["FromUnderlying"][
             self["Map"][ast["Op"]] @@ If[ast["Argument"] === None, Identity, Append[ast["Argument"]]][self["ToUnderlying"] /@ sources]
         ];
         If[ context =!= None, context[ast] = ret];

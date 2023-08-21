@@ -14,9 +14,9 @@ ShapeToAxis[oldShape : Shape, newShape : Shape] := Enclose[
 
 OpFunctionMap = <|
     "ADD" -> Plus, "SUB" -> Subtract, "MUL" -> Times, "DIV" -> Divide,
-    "SUM" -> Function[{x, shape}, If[x["Shape"] =!= shape, x["Sum"[ShapeToAxis[x["Shape"], shape], "KeepDims" -> True]], x]],
-    "MAX" -> Function[{x, shape}, If[x["Shape"] =!= shape, x["Max"[ShapeToAxis[x["Shape"], shape], "KeepDims" -> True]], x]],
-    "RESHAPE" -> Function[{x, shape}, x["Reshape"[shape]]],
+    "SUM" -> Function[{x, lvl}, x["$Extend"]["Sum"[lvl, "KeepDims" -> True]]],
+    "MAX" -> Function[{x, lvl}, x["$Extend"]["Max"[lvl, "KeepDims" -> True]]],
+    "RESHAPE" -> ArrayReshape,
     "SHRINK" -> Function[{x, arg}, x[[Sequence @@ Span @@@ arg]]],
 
     "NOOP" -> Function[{x}, x],
@@ -27,7 +27,7 @@ OpFunctionMap = <|
     "MAXIMUM" -> Max, "CMPEQ" -> Equal,
     "SQRT" -> Sqrt,
 
-    "PERMUTE" -> Transpose, "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, x["Broadcast"[shape]]],
+    "PERMUTE" -> Transpose, "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, x["$Extend"]["Expand"[shape]]],
     "STRIDE" -> Function[{x, strides}, x[[Sequence @@ (;; ;; # & /@ strides)]]],
     "MULACC" -> EinsteinSummation,
     "WHERE" -> Function[Null, #1["Where"[##2]]]

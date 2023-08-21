@@ -10,7 +10,7 @@ Class[Tensor, "Training" -> False, "NoGradient" -> False, "Type" -> "Real32"]
 
 Options[Tensor] = {"Device" -> None, "Type" -> None, "RequiresGradient" -> None}
 
-TensorData = _::[LazyBuffer] | _Integer | _Real | _Complex | _? ArrayQ | _ ? NumericArrayQ
+TensorData = _::[LazyBuffer] | _? ArrayQ | _ ? NumericArrayQ | _ ? NumericQ
 
 Tensor[data : TensorData,
     device: _String | None : None,
@@ -25,30 +25,40 @@ Tensor[data : TensorData, OptionsPattern[]] := Tensor["$New"[data, Sequence @@ O
 Tensor @ "$Init"[
     self_,
     initData : TensorData,
-    device : _String | None : None,
+    initDevice : _String | None : None,
     initType : _String | None : None,
     requiresGradient : _ ? BooleanQ | None : None
 ] := Enclose @ Block[{
     data = initData,
+    device = Replace[initDevice, None :> "CPU"],
     type = Replace[initType, None :> Tensor["Type"]]
 },
-    If[ data["$Class"] === Tensor, Return[data]];
+    If[ Tensor["$Test"][data], Return[data]];
     self["Gradient"] = None;
     self["RequiresGradient"] = requiresGradient;
     self["Context"] = None;
 
-    If[ data["$Class"] === LazyBuffer,
+    Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
+    Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
+    Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
+
+    Total[self, lvl_ : 1] ^:=
+        TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
+
+    f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
+
+    If[ LazyBuffer["$Test"][data],
         ConfirmAssert[initType === None || type === data["Type"]];
         self["LazyData"] = If[data["Device"] === device, data, data["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
         Return[self]
     ];
 
-    If[ MatchQ[data, _Integer | _Real | _Complex],
-        self["LazyData"] = LazyBuffer["LoadOp"["CONST", {}, type, device, data]];
+    If[ NumericQ[data],
+        self["LazyData"] = LazyBuffer["LoadOp"["CONST", {}, type, device, N[data]]];
         Return[self]
     ];
 
-    data = NumericArray[data, type];
+    data = NumericArray[N[data], type];
     If[ NumericArrayQ[data],
         data = LazyBuffer["FromCPU"[data]];
         self["LazyData"] = If[data["Device"] === device, data, LazyBuffer["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
@@ -61,13 +71,13 @@ Tensor @ "$Init"[
     |>]
 ]
 
-Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Dimension"}
+Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Dimension", "Graph"}
 
 Tensor[(prop : "Device" | "Shape" | "Type")[self_]] := self["LazyData"][prop]
 
 Tensor["Dimension"[self_]] := Times @@ self["Shape"]
 
-Tensor["Realize"[self_]] := (self["LazyData"]["Realize"[]]; self)
+Tensor["Realize"[self_]] := Enclose[Confirm @ self["LazyData"]["Realize"[]]; self]
 
 Tensor["Assign"[self_, x_]] := Enclose @ Block[{tensor = Tensor[x, "Type" -> self["Type"]]},
     ConfirmAssert[self["Shape"] === tensor["Shape"] && self["Device"] === tensor["Device"]];
@@ -81,7 +91,7 @@ Tensor["Assign"[self_, x_]] := Enclose @ Block[{tensor = Tensor[x, "Type" -> sel
 
 Tensor["Detach"[self_]] := Tensor[self["LazyData"], self["Device"], False]
 
-Tensor["$Normal"[self_]] := self["LazyData"]["ToCPU"[]]
+Tensor["$Normal"[self_]] := Normal @ self["LazyData"]
 
 Tensor["To"[self_, device_]] := With[{ret = Tensor[self["LazyData"], device]},
     If[ret["Gradient"] =!= None, ret["Gradient"]["To"[device]]];
@@ -90,6 +100,8 @@ Tensor["To"[self_, device_]] := With[{ret = Tensor[self["LazyData"], device]},
 
 
 Tensor["Reshape"[self_, shape_]] := TensorFunction["Reshape"] @ "Apply"[self, "Shape" -> Replace[shape, -1 :> - self["Dimension"] / Times @@ shape, {1}]]
+
+Tensor["Expand"[self_, shape_]] := TensorFunction["Expand"] @ "Apply"[self, "Shape" -> shape]
 
 Tensor["Pad"[self_, pad : {{_Integer, _Integer} ...}, value_ : 0]] :=
     TensorFunction["Pad"] @ "Apply"[self, "Padding" -> pad]
@@ -110,9 +122,78 @@ Tensor["$Format"[self_, form_]] :=
             {BoxForm`SummaryItem[{"Shape: ", self["Shape"]}]},
             {BoxForm`SummaryItem[{"Device: ", self["Device"]}]}
         },
-        {{}},
+        {
+            {BoxForm`SummaryItem[{"RequiresGradient: ", self["RequiresGradient"]}]},
+            {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]}
+        },
         form
     ]
+
+Tensor["Graph"[self_]] := Block[{edges = {}, visited = {}, deepwalk},
+    deepwalk[node_] := (
+        AppendTo[visited, node];
+        Scan[If[! MemberQ[visited, #], AppendTo[edges, node -> #]; deepwalk[#]] &, node["Op"]["Source"]];
+    );
+
+    deepwalk[self["LazyData"]];
+
+    Graph[
+        visited, edges,
+        VertexShapeFunction -> Function[
+            Inset[Style[
+                    If[#2["RealizedQ"], Framed, Identity] @ If[
+                        #2["Op"]["Argument"] === None,
+                        #2["OpName"],
+                        #2["OpName"][#2["Op"]["Argument"]]
+                    ],
+                    Black
+                ],
+                #1,
+                #3
+            ]
+        ],
+        GraphLayout -> "LayeredDigraphEmbedding",
+        PerformanceGoal -> "Quality"
+    ]
+]
+
+Tensor["DeepWalk"[self_]] := Block[{nodes = {}, visited = {}, deepwalk},
+    deepwalk[node_] := (
+        AppendTo[visited, node];
+        If[ TensorFunction["$Test"] @ node["Context"],
+            Scan[If[! MemberQ[visited, #], deepwalk[#]] &, node["Context"]["Parents"]];
+            AppendTo[nodes, node]
+        ]
+    );
+
+    deepwalk[self];
+
+    nodes
+]
+
+Tensor["Backward"[self_]] := Enclose @ Block[{grads},
+    ConfirmAssert[self["Shape"] === {}, "Only scalar gradients are currently supported"];
+    self["Gradient"] = Tensor[1, "Type" -> self["Type"], "Device" -> self["Device"], "RequiresGradient" -> False];
+    Do[
+        If[! t0["RequiresGradients"], Continue[]];
+        ConfirmAssert[t0["Gradient"] =!= None];
+        grads = Replace[
+            Developer`ToList[t0["Context"]["Backward"[t0["Gradient"]["LazyData"]]]],
+            g : Except[None] :> Tensor[g, "Device" -> self["Device"], "RequiresGradient" -> False],
+            {1}
+        ];
+        MapThread[
+            {t, g} |-> If[g =!= None && t["RequiresGradient"],
+                ConfirmAssert[t["Shape"] === g["Shape"], StringTemplate["Gradient stape must match tensor shape, `` != ``"][g["Shape"], t["Shape"]]];
+                t["Gradient"] = If[t["Gradient"] === None, g, t["Gradient"] + g];
+            ],
+            {t0["Context"]["Parents"], grads}
+        ];
+        t0["Context"] =.;
+        ,
+        {t0, Reverse[self["DeepWalk"[]]]}
+    ]
+]
 
 Tensor["Cast"[self_, type_]] := If[self["Type"] === type, self, TensorFunction["Cast"] @ "Apply"[self, "Type" -> type]]
 Tensor["Float"[self_]] := self["Cast"["Float32"]]
@@ -130,3 +211,22 @@ Tensor["Sqrt"[self_]] := TensorFunction["Sqrt"] @ "Apply"[self]
 Tensor["RSqrt"[self_]] := (1 / self)["Sqrt"[]]
 Tensor["Cos"[self_]] := (Pi / 2 - self)["Sin"[]]
 Tensor["Tan"[self_]] := self@"Sin"[] / self@"Cos"[]
+
+Tensor["Broadcast"[self_, f_, others___]] :=
+    Fold[
+        Block[{x = #1, y = Tensor[#2, #1["Device"], #1["Type"]], shape},
+            If[x["Shape"] === y["Shape"], Return[TensorFunction[f] @ "Apply"[x, y]]];
+            xRank = Length[x["Shape"]];
+            yRank = Length[y["Shape"]];
+            rank = Max[xRank, yRank];
+            If[xRank != rank, x = x["Reshape"[Join[ConstantArray[1, rank - xRank], x["Shape"]]]]];
+            If[yRank != rank, y = y["Reshape"[Join[ConstantArray[1, rank - yRank], y["Shape"]]]]];
+            shape = MapThread[Max, {x["Shape"], y["Shape"]}];
+            If[x["Shape"] != shape, x = x["Expand"[shape]]];
+            If[y["Shape"] != shape, y = y["Expand"[shape]]];
+            TensorFunction[f] @ "Apply"[x, y]
+        ] &,
+        self,
+        {others}
+    ]
+

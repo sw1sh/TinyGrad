@@ -148,9 +148,8 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
 
 
 shapesCompatibleQ[{l_, ls___}, {r_, rs___}] := Which[Divisible[l, r], shapesCompatibleQ[{l / r, ls}, {rs}], Divisible[r, l], shapesCompatibleQ[{ls}, {r / l, rs}], True, False]
-shapesCompatibleQ[{1}, {}] := True
-shapesCompatibleQ[{}, {1}] := True
-shapesCompatibleQ[{}, {}] := True
+shapesCompatibleQ[{1...}, {}] := True
+shapesCompatibleQ[{}, {1...}] := True
 shapesCompatibleQ[_, _] := False
 
 mergeShapeStrides[ss_] := FixedPoint[
@@ -180,10 +179,13 @@ Class[ShapeTracker,
         self["Views"][[-1]]["Shape"]
     ], *)
 
-    "$Properties" -> {"ContiguousQ", "Shape"},
+    "$Properties" -> {"ContiguousQ", "Shape", "Strides", "Offset", "Mask"},
 
     "ContiguousQ"[self_] :> Length[self["Views"]] == 1 && self["Views"][[1]]["ContiguousQ"],
     "Shape"[self_] :> self["Views"][[-1]]["Shape"],
+    "Strides"[self_] :> self["Views"][[-1]]["Strides"],
+    "Offset"[self_] :> self["Views"][[-1]]["Offset"],
+    "Mask"[self_] :> self["Views"][[-1]]["Mask"],
 
     "Permute"[self_, perm_Cycles] :> With[{view = self["Views"][[-1]]},
         self["Views"] = ReplacePart[self["Views"],
@@ -197,6 +199,15 @@ Class[ShapeTracker,
     ],
     "Permute"[self_, perm_List] :> self["Permute"[FindPermutation[perm]]],
 
+    "Expand"[self_, shape_] :> Enclose[
+        ConfirmAssert[Length[self["Shape"]] == Length[shape]];
+        ConfirmAssert[And @@ MapThread[#1 == #2 || #2 == 1 && #3 == 0 &, {shape, self["Shape"], self["Strides"]}]];
+        self["Views"] = ReplacePart[self["Views"],
+            -1 -> View[shape, self["Strides"], self["Offset"], self["Mask"]]
+        ];
+        self
+    ],
+
     "Reshape"[self_, shape : Shape] :> Enclose[
         ConfirmAssert[Times @@ shape == Times @@ self["Shape"]];
         With[{
@@ -206,7 +217,7 @@ Class[ShapeTracker,
             }]
         },
             If[ Length[merge] == 1,
-                self["Views"] = ReplacePart[self["Views"], -1 -> View @@ merge],
+                self["Views"] = ReplacePart[self["Views"], -1 -> View @@ merge[[1]]],
                 self["Views"] = Append[self["Views"], View @@ merge[[1]]]
             ]
         ];
