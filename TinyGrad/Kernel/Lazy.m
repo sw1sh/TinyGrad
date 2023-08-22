@@ -33,14 +33,7 @@ Class[LazyBuffer,
 ]
 
 
-LazyBuffer[device_, shapeTracker_, op_, type_, src_ : None] :=
-    LazyBuffer["$New"[
-        device,
-        shapeTracker,
-        op,
-        type,
-        src
-    ]]
+LazyBuffer[args__] := LazyBuffer["$New"[args]]
 
 LazyBuffer::realize = "Failed to realize ``"
 
@@ -152,7 +145,10 @@ RealizeCustom[buffer_::[LazyBuffer]] :=
     buffer["Realized"] = Enclose @ buffer["Op"]["Argument"][buffer, Sequence @@ ConfirmBy[Through[buffer["Op"]["Source"]["Realize"]], AllTrue[Not @* FailureQ]]]
 
 RealizeEmpty[buffer_::[LazyBuffer]] :=
-    buffer["Realized"] = Device[buffer["Device"]]["Buffer"][Times @@ buffer["Shape"], buffer["Type"], Sequence @@ buffer["DeviceExtraArgs"]]
+    buffer["Realized"] = Device[buffer["Device"]]["Buffer"][Times @@ buffer["Shape"], buffer["Type"]]
+
+RealizeRand[buffer_::[LazyBuffer]] :=
+    buffer["Realized"] = Device[buffer["Device"]]["Buffer"]["FromCPU"[StridedArray[SeedRandom[buffer["Op"]["Argument"]]; RandomReal[1, buffer["Shape"]]]]]
 
 ElementwiseOp[op_, inputs : Except[_Rule] .., OptionsPattern[{"Argument" -> None}]] := Enclose @ Block[{
     firstSrc = Confirm @ First[MaximalBy[Select[{inputs}, LazyBuffer["$Test"]], #["Rank"] &], Missing[]],
@@ -169,5 +165,6 @@ ElementwiseOp[op_, inputs : Except[_Rule] .., OptionsPattern[{"Argument" -> None
 DispatchLoadOp = <|
     "EMPTY" -> RealizeEmpty,
     "CONTIGUOUS" -> RealizeContiguous,
-    "CONST" -> RealizeConst
+    "CONST" -> RealizeConst,
+    "RAND" -> RealizeRand
 |>

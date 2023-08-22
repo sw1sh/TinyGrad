@@ -6,70 +6,64 @@ PackageImport["Wolfram`Class`"]
 
 
 
-Class[Tensor, "Training" -> False, "NoGradient" -> False, "Type" -> "Real32"]
-
 Options[Tensor] = {"Device" -> None, "Type" -> None, "RequiresGradient" -> None}
 
 TensorData = _::[LazyBuffer] | _? ArrayQ | _ ? NumericArrayQ | _ ? NumericQ
 
-Tensor[data : TensorData,
-    device: _String | None : None,
-    type : _String | None : None,
-    requiresGradient : _ ? BooleanQ | None : None,
-    opts : OptionsPattern[]
-] :=
-    Tensor[data, opts, "Device" -> device, "Type" -> type, "RequiresGradient" -> requiresGradient]
+Class[Tensor,
+    "Training" -> False, "NoGradient" -> False, "Type" -> "Real32", "Device" -> "CPU", "Seed" -> 0,
 
-Tensor[data : TensorData, OptionsPattern[]] := Tensor["$New"[data, Sequence @@ OptionValue[Keys[Options[Tensor]]]]]
+    "$Init"[NameValuePattern[
+        self_,
+        Data : TensorData,
+        Device : _String | None : None,
+        Type : _String | None : None,
+        RequiresGradient : _ ? BooleanQ | None : None
+    ]] :> Enclose @ Block[{
+        data = Data,
+        device = Replace[Device, None :> "CPU"],
+        type = Replace[Type, None :> Tensor["Type"]]
+    },
+        If[ Tensor["$Test"][data], Return[data]];
+        self["Gradient"] = None;
+        self["RequiresGradient"] = RequiresGradient;
+        self["Context"] = None;
 
-Tensor @ "$Init"[
-    self_,
-    initData : TensorData,
-    initDevice : _String | None : None,
-    initType : _String | None : None,
-    requiresGradient : _ ? BooleanQ | None : None
-] := Enclose @ Block[{
-    data = initData,
-    device = Replace[initDevice, None :> "CPU"],
-    type = Replace[initType, None :> Tensor["Type"]]
-},
-    If[ Tensor["$Test"][data], Return[data]];
-    self["Gradient"] = None;
-    self["RequiresGradient"] = requiresGradient;
-    self["Context"] = None;
+        Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
+        Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
+        Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
 
-    Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
-    Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
-    Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
+        Total[self, lvl_ : 1] ^:=
+            TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
 
-    Total[self, lvl_ : 1] ^:=
-        TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
+        f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
 
-    f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
+        If[ LazyBuffer["$Test"][data],
+            ConfirmAssert[Type === None || type === data["Type"]];
+            self["LazyData"] = If[data["Device"] === device, data, data["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
+            Return[self]
+        ];
 
-    If[ LazyBuffer["$Test"][data],
-        ConfirmAssert[initType === None || type === data["Type"]];
-        self["LazyData"] = If[data["Device"] === device, data, data["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
-        Return[self]
-    ];
+        If[ NumericQ[data],
+            self["LazyData"] = LazyBuffer["LoadOp"["CONST", {}, type, device, N[data]]];
+            Return[self]
+        ];
 
-    If[ NumericQ[data],
-        self["LazyData"] = LazyBuffer["LoadOp"["CONST", {}, type, device, N[data]]];
-        Return[self]
-    ];
+        data = NumericArray[N[data], type];
+        If[ NumericArrayQ[data],
+            data = LazyBuffer["FromCPU"[data]];
+            self["LazyData"] = If[data["Device"] === device, data, LazyBuffer["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
+            Return[self]
+        ];
 
-    data = NumericArray[N[data], type];
-    If[ NumericArrayQ[data],
-        data = LazyBuffer["FromCPU"[data]];
-        self["LazyData"] = If[data["Device"] === device, data, LazyBuffer["LoadOp"["FROM", data["Shape"], data["Type"], device, data]]];
-        Return[self]
-    ];
-
-    Failure[<|
-        "MessageTemplate" :> "Can't create Tensor from ``",
-        "MessageParameters" -> {initData}
-    |>]
+        Failure[<|
+            "MessageTemplate" :> "Can't create Tensor from ``",
+            "MessageParameters" -> {Data}
+        |>]
+    ]
 ]
+
+Tensor[args___] := Tensor["$New"[args]]
 
 Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Dimension", "Graph"}
 
@@ -230,3 +224,21 @@ Tensor["Broadcast"[self_, f_, others___]] :=
         {others}
     ]
 
+
+StaticMethod[
+Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ : None], opts___]] :=
+    Tensor[
+        LazyBuffer @ "LoadOp"[
+            op, {size},
+            If[type === None, Tensor["Type"], type],
+            If[device === None, Tensor["Device"], device],
+            arg
+        ],
+        opts
+    ]
+]
+
+(* RNG *)
+StaticMethod[
+Tensor["Rand"[shape : Shape, opts : OptionsPattern[]]] := Tensor["LoadOp"["RAND", Times @@ shape, "arg" -> Tensor["Seed"], opts]] @ "Reshape"[shape]
+]

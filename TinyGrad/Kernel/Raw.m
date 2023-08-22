@@ -28,7 +28,7 @@ Class[RawBuffer,
         form
     ],
     "$ClassMethods" -> {"FromCPU"},
-    "$Normal"[self_] :> Normal[self["ToCPU"[]]],
+    "$Normal"[self_] :> Normal[self["ToCPU"[]]]
 ]
 
 RawBuffer[args___] := RawBuffer["$New"[args]]

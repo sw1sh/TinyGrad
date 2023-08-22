@@ -203,4 +203,4 @@ reduce[f_, self_, lvl_, OptionsPattern[{"KeepDims" -> False}]] := Enclose @ Bloc
     self
 ]
 
-StridedArray[args___] := StridedArray@ "$New"[args]
+StridedArray[data_, args___] := StridedArray@ "$New"[If[ArrayQ[data], NumericArray[data], data], args]
