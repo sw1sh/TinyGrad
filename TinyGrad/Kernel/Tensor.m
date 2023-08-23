@@ -8,7 +8,7 @@ PackageImport["Wolfram`Class`"]
 
 Options[Tensor] = {"Device" -> None, "Type" -> None, "RequiresGradient" -> None}
 
-TensorData = _::[LazyBuffer] | _? ArrayQ | _ ? NumericArrayQ | _ ? NumericQ
+TensorData = _::[Tensor] | _::[LazyBuffer] | _? ArrayQ | _ ? NumericArrayQ | _ ? NumericQ
 
 Class[Tensor,
     "Training" -> False, "NoGradient" -> False, "Type" -> "Real32", "Device" -> "CPU", "Seed" -> 0,
@@ -24,9 +24,16 @@ Class[Tensor,
         device = Replace[Device, None :> "CPU"],
         type = Replace[Type, None :> Tensor["Type"]]
     },
-        self["Gradient"] = None;
-        self["RequiresGradient"] = RequiresGradient;
-        self["Context"] = None;
+        If[ Tensor["$Test"][data],
+            self["Gradient"] = data["Gradient"];
+            self["RequiresGradient"] = Replace[RequiresGradient, None :> data["RequiresGradient"]];
+            self["Context"] = data["Context"];
+            data = data["LazyData"];
+            ,
+            self["Gradient"] = None;
+            self["RequiresGradient"] = RequiresGradient;
+            self["Context"] = None
+        ];
 
         Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
         Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
@@ -40,8 +47,12 @@ Class[Tensor,
             (x * y) @ "Sum"[-1]
         ];
 
+        Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i, j], order_ :> "Permute"[order]}]];
+
         Total[self, lvl_ : 1] ^:=
             TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
+
+        D[self, t_] ^:= Enclose[Confirm @ self["Backward"[]]; t["Gradient"]];
 
         f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
 
@@ -69,8 +80,6 @@ Class[Tensor,
         |>]
     ]
 ]
-
-Tensor[t_::[Tensor], ___] := t
 
 Tensor[args___] := Tensor["$New"[args]]
 
@@ -181,7 +190,7 @@ Tensor["Backward"[self_]] := Enclose @ Block[{grads},
     ConfirmAssert[self["Shape"] === {}, "Only scalar gradients are currently supported"];
     self["Gradient"] = Tensor[1, "Type" -> self["Type"], "Device" -> self["Device"], "RequiresGradient" -> False];
     Do[
-        If[! t0["RequiresGradients"], Continue[]];
+        If[t0["RequiresGradients"] === False, Continue[]];
         ConfirmAssert[t0["Gradient"] =!= None];
         grads = Replace[
             Developer`ToList[t0["Context"]["Backward"[t0["Gradient"]["LazyData"]]]],
@@ -190,12 +199,12 @@ Tensor["Backward"[self_]] := Enclose @ Block[{grads},
         ];
         MapThread[
             {t, g} |-> If[g =!= None && t["RequiresGradient"],
-                ConfirmAssert[t["Shape"] === g["Shape"], StringTemplate["Gradient stape must match tensor shape, `` != ``"][g["Shape"], t["Shape"]]];
+                ConfirmAssert[t["Shape"] === g["Shape"], StringTemplate["Gradient stape must match tensor shape: ``"][t0]];
                 t["Gradient"] = If[t["Gradient"] === None, g, t["Gradient"] + g];
             ],
             {t0["Context"]["Parents"], grads}
         ];
-        t0["Context"] =.;
+        (* t0["Context"] =.; *)
         ,
         {t0, Reverse[self["DeepWalk"[]]]}
     ]

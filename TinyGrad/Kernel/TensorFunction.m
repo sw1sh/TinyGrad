@@ -98,14 +98,14 @@ Class["Expand" -> TensorFunction,
         self["InputShape"] = x["Shape"];
         x @ "Expand"[shape]
     ],
-    "Backward"[self_, grad_] :> grad @ "ReduceOp"["SUM", self["InputShape"]]
+    "Backward"[self_, grad_] :> grad @ "ReduceOp"["SUM", Catenate @ Complement[Position[self["InputShape"], 1], Position[grad["Shape"], 1]]]
 ]
 
 Class["Permute" -> TensorFunction,
     "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{order = OptionValue[{opts}, "Order"]},
-        self["InputOrder"] = x["Shape"]; x @ "Permute"[order]
-    ],,
-    "Backward"[self_, grad_] :> grad @ "Permute"[Sort[self["InputOrder"]]]
+        self["InputShape"] = x["Shape"]; x @ "Permute"[order]
+    ],
+    "Backward"[self_, grad_] :> grad @ "Permute"[PermutationList @ FindPermutation[grad["Shape"], self["InputShape"]]]
 ]
 
 Class["Pad" -> TensorFunction,

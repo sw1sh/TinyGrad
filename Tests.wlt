@@ -6,7 +6,7 @@ Needs["TinyGrad`"]
 
 
 
-ApproximatelyEqual[x_,  y_,eps_:1*^-6] := Abs[Total[x - y, All]] < eps
+ApproximatelyEqual[x_,  y_,eps_:1*^-6] := Abs[Total[x - y, All]] / Times @@ Dimensions[x] < eps
 
 VerificationTest[(* 1 *)
 	ArrayQ[Normal[Tensor["Rand"[{5,  2}]]],  2]
@@ -21,17 +21,29 @@ VerificationTest[(* 2 *)
 ]
 
 VerificationTest[(* 3 *)
-	With[{t = Tensor[{{1,  2, 3},  {4,  5, 6}},  "RequiresGradient" -> True]},  Total[Cos[Sin[t]],  All]["Backward"[]]; Normal[t["Gradient"]]]
-	,
-	{{-0.4028624892234802,  0.3283699154853821, 0.1392444521188736},  {-0.4487919211387634,  0.23219843208789825, 0.2648090422153473}}	
-]
-
-VerificationTest[(* 4 *)
 	t = Tensor["Rand"[{4, 5}]]; 
 u = Tensor["Rand"[{5, 4}]]; 
 ApproximatelyEqual[Normal[t . u], Normal[t] . Normal[u]]
 	,
 	True	
 ]
+
+BeginTestSection["Gradient"]
+
+VerificationTest[(* 4 *)
+	With[{t = Tensor[{{1,  2, 3},  {4,  5, 6}},  "RequiresGradient" -> True]},  Total[Cos[Sin[t]],  All]["Backward"[]]; Normal[t["Gradient"]]]
+	,
+	{{-0.4028624892234802,  0.3283699154853821, 0.1392444521188736},  {-0.4487919211387634,  0.23219843208789825, 0.2648090422153473}}	
+]
+
+VerificationTest[(* 5 *)
+	With[{t=Tensor["Rand"[{4, 5}, "RequiresGradient"->True]]}, 
+ApproximatelyEqual[Normal@D[Total[t.t\[Transpose], 2], t], FunctionLayer[Function[t, Total[t.t\[Transpose], 2]]][Normal[t], NetPortGradient["t"]]]
+]
+	,
+	True	
+]
+
+EndTestSection[]
 
 EndTestSection[]

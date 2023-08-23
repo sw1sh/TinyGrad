@@ -193,7 +193,7 @@ reduce[f_, self_, lvl_, OptionsPattern[{"KeepDims" -> False}]] := Enclose @ Bloc
     keepDims = OptionValue["KeepDims"],
     result
 },
-    result = Confirm @ AggregationLayer[f, lvl][Normal[self]];
+    result = Confirm @ AggregationLayer[f, Replace[lvl, l_Integer :> ;; l]][Normal[self]];
     result = If[NumericQ[result], NumericArray[{result}], NumericArray[Flatten[result]]];
     self["Pointer"] = RawMemoryExport @ result;
     If[ keepDims,
