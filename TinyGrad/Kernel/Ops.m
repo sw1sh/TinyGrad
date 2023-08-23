@@ -88,9 +88,9 @@ Class[Interpreted,
         newContext = If[context === None, <||>, context];
         sources = Map[If[LazyOpQ[#], self[Unevaluated @ "Execute"[#, None, newContext, args]], self["FromLazyBuffer"][#]] &, ast["Source"]];
         ConfirmAssert[KeyExistsQ[self["Map"], ast["Op"]], ast["Op"]];
-        ret = Confirm @ self["FromUnderlying"][
+        ret = Confirm[self["FromUnderlying"][
             self["Map"][ast["Op"]] @@ If[ast["Argument"] === None, Identity, Append[ast["Argument"]]][self["ToUnderlying"] /@ sources]
-        ];
+        ], self["Map"][ast["Op"]]];
         If[ context =!= None, context[ast] = ret];
         If[ output =!= None && output["OutputBuffer"] =!= None,
             ConfirmAssert[

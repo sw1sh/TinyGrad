@@ -24,7 +24,6 @@ Class[Tensor,
         device = Replace[Device, None :> "CPU"],
         type = Replace[Type, None :> Tensor["Type"]]
     },
-        If[ Tensor["$Test"][data], Return[data]];
         self["Gradient"] = None;
         self["RequiresGradient"] = RequiresGradient;
         self["Context"] = None;
@@ -32,6 +31,14 @@ Class[Tensor,
         Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
         Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
         Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
+        Dot[self, w_] ^:= Enclose @ Block[{shape1 = self["Shape"], shape2 = w["Shape"], n1 = self["Rank"], n2 = w["Rank"], i, x, y},
+            i = - Min[n2, 2];
+            ConfirmAssert[n1 > 0 && n2 > 0];
+            ConfirmAssert[shape1[[-1]] === shape2[[i]]];
+            x = self @ "Reshape"[Join[shape1[[;; -2]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape1[[-1 ;;]]]];
+            y = w @* "Reshape"[Join[shape2[[;; -3]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape2[[i ;; ]]]] @* "Transpose"[-1, i];
+            (x * y) @ "Sum"[-1]
+        ];
 
         Total[self, lvl_ : 1] ^:=
             TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
@@ -63,11 +70,13 @@ Class[Tensor,
     ]
 ]
 
+Tensor[t_::[Tensor], ___] := t
+
 Tensor[args___] := Tensor["$New"[args]]
 
-Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Dimension", "Graph"}
+Tensor["$Properties"] = {"Device", "Shape", "Type", "$Normal", "Rank", "Dimension", "Graph"}
 
-Tensor[(prop : "Device" | "Shape" | "Type")[self_]] := self["LazyData"][prop]
+Tensor[(prop : "Device" | "Shape" | "Type" | "Rank")[self_]] := self["LazyData"][prop]
 
 Tensor["Dimension"[self_]] := Times @@ self["Shape"]
 
@@ -100,6 +109,9 @@ Tensor["Expand"[self_, shape_]] := TensorFunction["Expand"] @ "Apply"[self, "Sha
 Tensor["Pad"[self_, pad : {{_Integer, _Integer} ...}, value_ : 0]] :=
     TensorFunction["Pad"] @ "Apply"[self, "Padding" -> pad]
 
+Tensor["Permute"[self_, order_]] := TensorFunction["Permute"] @ "Apply"[self, "Order" -> order]
+
+Tensor["Transpose"[self_, ax1_ : 2, ax2_ : 1]] := self["Permute"[With[{order = Range[self["Rank"]]}, ReplacePart[order, {ax1 -> order[[ax2]], ax2 -> order[[ax1]]}]]]]
 
 Tensor["Eye"[dim_Integer ? Positive, args___]] := Tensor[{1}, args] @* "Pad"[{{0, dim}}] @* "Reshape"[1, dim + 1] @* "Expand"[dim, dim + 1] @* "Reshape"[dim * (dim + 1)] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[dim, dim]
 
@@ -138,7 +150,7 @@ Tensor["Graph"[self_]] := Block[{edges = {}, visited = {}, deepwalk},
                     If[#2["RealizedQ"], Framed, Identity] @ If[
                         #2["Op"]["Argument"] === None,
                         #2["OpName"],
-                        #2["OpName"][#2["Op"]["Argument"]]
+                        #2["OpName"][#2["Op"]["Argument"] /. _RandomGeneratorState :> "seed"]
                     ],
                     Black
                 ],
@@ -206,6 +218,9 @@ Tensor["RSqrt"[self_]] := (1 / self)["Sqrt"[]]
 Tensor["Cos"[self_]] := (Pi / 2 - self)["Sin"[]]
 Tensor["Tan"[self_]] := self@"Sin"[] / self@"Cos"[]
 
+Tensor[(f : "Sum" | "Max")[self_, args___]] := self["Reduce"[f, args]]
+Tensor["Min"[self_, args___]] := - (- self)["Max"[args]]
+
 Tensor["Broadcast"[self_, f_, others___]] :=
     Fold[
         Block[{x = #1, y = Tensor[#2, #1["Device"], #1["Type"]], shape},
@@ -213,17 +228,25 @@ Tensor["Broadcast"[self_, f_, others___]] :=
             xRank = Length[x["Shape"]];
             yRank = Length[y["Shape"]];
             rank = Max[xRank, yRank];
-            If[xRank != rank, x = x["Reshape"[Join[ConstantArray[1, rank - xRank], x["Shape"]]]]];
-            If[yRank != rank, y = y["Reshape"[Join[ConstantArray[1, rank - yRank], y["Shape"]]]]];
+            If[xRank =!= rank, x = x["Reshape"[Join[ConstantArray[1, rank - xRank], x["Shape"]]]]];
+            If[yRank =!= rank, y = y["Reshape"[Join[ConstantArray[1, rank - yRank], y["Shape"]]]]];
             shape = MapThread[Max, {x["Shape"], y["Shape"]}];
-            If[x["Shape"] != shape, x = x["Expand"[shape]]];
-            If[y["Shape"] != shape, y = y["Expand"[shape]]];
+            If[x["Shape"] =!= shape, x = x["Expand"[shape]]];
+            If[y["Shape"] =!= shape, y = y["Expand"[shape]]];
             TensorFunction[f] @ "Apply"[x, y]
         ] &,
         self,
         {others}
     ]
 
+Tensor["Reduce"[self_, f_, axis_ : None, keepDim_ : False]] := Block[{
+    axes = Developer`ToList @ Replace[axis, None :> Range[Length[self["Shape"]]]],
+    result
+},
+    axes = Replace[axes, i_ /; i < 0 :> i + 1 + Length[self["Shape"]], {1}];
+    result = TensorFunction[f] @ "Apply"[self, "Level" -> axes];
+    If[keepDim, result, result["Reshape"[Delete[self["Shape"], List /@ axes]]]]
+]
 
 StaticMethod[
 Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ : None], opts___]] :=
@@ -238,7 +261,20 @@ Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ 
     ]
 ]
 
+
 (* RNG *)
+
 StaticMethod[
-Tensor["Rand"[shape : Shape, opts : OptionsPattern[]]] := Tensor["LoadOp"["RAND", Times @@ shape, "arg" -> Tensor["Seed"], opts]] @ "Reshape"[shape]
+Tensor["Rand"[shape : Shape, opts : OptionsPattern[]]] := Tensor["LoadOp"["RAND", Times @@ shape, "arg" -> $RandomGeneratorState, opts]] @ "Reshape"[shape]
+]
+
+
+StaticMethod[
+Tensor["Uniform"[NameValuePattern[shape : Shape, low_ : -1.0, high_ : 1.0], opts : OptionsPattern[]]] :=
+    (high - low) * Tensor["Rand"[shape, opts]] + low
+]
+
+StaticMethod[
+Tensor["ScaledUniform"[shape : Shape, args___]] :=
+    Tensor["Uniform"[shape, args]] / Sqrt[Times @@ shape]
 ]

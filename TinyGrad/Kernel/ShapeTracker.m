@@ -102,8 +102,7 @@ Class[
     ]
 ]
 
-View[shape_, initStrides_ : None, offset_ : 0, mask_ : None] :=
-    View @ "$New"[shape, initStrides, offset, mask]
+View[args___] := View @ "$New"[args]
 
 MergeViews[view2_, view1_] := Block[{st, strides},
     If[view2["Mask"] =!= None, Return[None]];
@@ -156,11 +155,11 @@ mergeShapeStrides[ss_] := FixedPoint[
 	SequenceReplace[
 		s : {{shape1_, strides_}, {shape2_, _}} /; shapesCompatibleQ[shape2, shape1[[Reverse @ Ordering[strides]]]] :> {
 			shape1,
-			Fold[
+			 Fold[
                 IntegerDigits[#1, MixedRadix[#2[[1]]], Length[#2[[1]]]] . #2[[2]] &,
                 FromDigits[UnitVector[Length[shape1], #], MixedRadix[shape1]],
                 s
-            ] & /@ Range[Length[shape1]]
+            ] & /@ Range[Length[shape1]] // ReplacePart[Position[shape1, 1] -> 0]
 		}
 	],
 	ss
@@ -168,8 +167,8 @@ mergeShapeStrides[ss_] := FixedPoint[
 
 Class[ShapeTracker,
 
-    "$Init"[self_, shape : (_::[ShapeTracker]) | {___Integer}, views : {_::[View] ...} | None : None] :> (
-        self["Views"] = If[views === None, If[MatchQ[shape, ShapeTracker["$Type"]], shape["Views"], ShapeViews[shape]], views];
+    "$Init"[self_, shape : _::[ShapeTracker] | {___Integer}, views : {_::[View] ...} | None : None] :> (
+        self["Views"] = If[views === None, If[ShapeTracker["$Test"][shape], shape["Views"], ShapeViews[shape]], views];
         self
     ),
 
@@ -179,15 +178,18 @@ Class[ShapeTracker,
         self["Views"][[-1]]["Shape"]
     ], *)
 
-    "$Properties" -> {"ContiguousQ", "Shape", "Strides", "Offset", "Mask"},
+    "$Properties" -> {"ContiguousQ", "Shape", "Strides", "Offset", "Mask", "Rank", "Dimension"},
 
     "ContiguousQ"[self_] :> Length[self["Views"]] == 1 && self["Views"][[1]]["ContiguousQ"],
     "Shape"[self_] :> self["Views"][[-1]]["Shape"],
     "Strides"[self_] :> self["Views"][[-1]]["Strides"],
     "Offset"[self_] :> self["Views"][[-1]]["Offset"],
     "Mask"[self_] :> self["Views"][[-1]]["Mask"],
+    "Rank"[self_] :> Length[self["Shape"]],
+    "Dimesion"[self_] :> Times @@ self["Shape"],
 
-    "Permute"[self_, perm_Cycles] :> With[{view = self["Views"][[-1]]},
+    "Permute"[self_, perm_Cycles] :> Enclose @ With[{view = self["Views"][[-1]]},
+        ConfirmAssert[PermutationLength[perm] <= self["Rank"]];
         self["Views"] = ReplacePart[self["Views"],
             -1 -> View[
                 Permute[view["Shape"], perm],
@@ -195,9 +197,10 @@ Class[ShapeTracker,
                 view["Offset"],
                 If[view["Mask"] === None, None, Permute[view["Mask"], perm]]
             ]
-        ]
+        ];
+        self
     ],
-    "Permute"[self_, perm_List] :> self["Permute"[FindPermutation[perm]]],
+    "Permute"[self_, order_List] :> self["Permute"[FindPermutation[order]]],
 
     "Expand"[self_, shape_] :> Enclose[
         ConfirmAssert[Length[self["Shape"]] == Length[shape]];

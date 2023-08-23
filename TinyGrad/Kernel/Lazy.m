@@ -82,18 +82,18 @@ LazyBuffer["Contiguous"[self_]] := If[
     LazyBuffer[self["Device"], ShapeTracker[self["Shape"]], LazyOp["CONTIGUOUS", {self}], self["Type"]]
 ]
 
-LazyBuffer["Permute"[self_, perm_List]] := Block[{},
+LazyBuffer["Permute"[self_, order_List]] := Enclose[
 
-    If[ perm === Range[Length[self["Shape"]]], Return[self]];
-    If[ self["Realized"] =!= None && self["OpName"] === "PERMUTE", Return[self["Op"]["Source"][[1]]["Permute"[self["Op"]["Argument"][[perm]]]]]];
+    If[ order === Range[Length[self["Shape"]]], Return[self]];
+    If[ self["Realized"] =!= None && self["OpName"] === "PERMUTE", Return[self["Op"]["Source"][[1]]["Permute"[self["Op"]["Argument"][[order]]]]]];
     (* TODO: Optimizations *)
-    LazyBuffer[self["Device"], self["ShapeTracker"] @* "$Extend" @* "Permute"[perm], LazyOp["PERMUTE", {self}, perm], self["Type"]]
+    LazyBuffer[self["Device"], Confirm[ShapeTracker[self["ShapeTracker"]] @ "Permute"[order]], LazyOp["PERMUTE", {self}, order], self["Type"]]
 ]
 
 LazyBuffer["Expand"[self_, dims_List]] := Block[{},
     If[ dims === self["Shape"], Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "EXPAND", Return[self["Op"]["Source"][[1]]["Expand"[dims]]]];
-    LazyBuffer[self["Device"], self["ShapeTracker"] @* "$Extend" @* "Expand"[dims], LazyOp["EXPAND", {self}, dims], self["Type"]]
+    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Expand"[dims], LazyOp["EXPAND", {self}, dims], self["Type"]]
 ]
 
 LazyBuffer["Reshape"[self_, shape_]] := (
@@ -101,7 +101,7 @@ LazyBuffer["Reshape"[self_, shape_]] := (
     If[ self["Realized"] =!= None && self["OpName"] === "RESHAPE",
         Return[self["Op"]["Source"][[1]]["Reshape"[shape]]]
     ];
-    LazyBuffer[self["Device"], self["ShapeTracker"] @* "$Extend" @* "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
+    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
 )
 
 LazyBuffer["Buffers"[self_]] := {self}
@@ -150,7 +150,7 @@ RealizeEmpty[buffer_::[LazyBuffer]] :=
 RealizeRand[buffer_::[LazyBuffer]] :=
     buffer["Realized"] = Device[buffer["Device"]]["Buffer"]["FromCPU"[StridedArray[SeedRandom[buffer["Op"]["Argument"]]; RandomReal[1, buffer["Shape"]]]]]
 
-ElementwiseOp[op_, inputs : Except[_Rule] .., OptionsPattern[{"Argument" -> None}]] := Enclose @ Block[{
+ElementwiseOp[PatternSequence[op_, inputs___], OptionsPattern[{"Argument" -> None}]] := Enclose @ Block[{
     firstSrc = Confirm @ First[MaximalBy[Select[{inputs}, LazyBuffer["$Test"]], #["Rank"] &], Missing[]],
     device, shape,
     type, srcs

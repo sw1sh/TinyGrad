@@ -102,7 +102,9 @@ Class["Expand" -> TensorFunction,
 ]
 
 Class["Permute" -> TensorFunction,
-    "Forward"[self_, x_, order_] :> (self["InputOrder"] = x[order]; x @ "Permute"[order]),
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{order = OptionValue[{opts}, "Order"]},
+        self["InputOrder"] = x["Shape"]; x @ "Permute"[order]
+    ],,
     "Backward"[self_, grad_] :> grad @ "Permute"[Sort[self["InputOrder"]]]
 ]
 

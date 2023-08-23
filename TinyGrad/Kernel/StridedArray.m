@@ -54,13 +54,13 @@ Class[StridedArray,
         self["Strides"] = strides;
 
         f_Symbol[largs___, self, rargs___] /; MemberQ[Attributes[f], NumericFunction] ^:=
-            elementwise[f, self["$Extend"], {largs}, {rargs}];
+            elementwise[f, StridedArray[self], {largs}, {rargs}];
 
-        ArrayReshape[self, args___] ^:= reshape[self @ "$Extend", args];
+        ArrayReshape[self, args___] ^:= reshape[StridedArray[self], args];
 
-        Cast[self, args___] ^:= cast[self @ "$Extend", args];
+        Cast[self, args___] ^:= cast[StridedArray[self], args];
 
-        Transpose[self, args___] ^:= self["$Extend"]["Transpose"[args]];
+        Transpose[self, args___] ^:= StridedArray[self]["Transpose"[args]];
 
 
         self
@@ -149,13 +149,13 @@ PrimeReshape[a_::[StridedArray]] := (
 
 reshape[self_, shape_] := Enclose @ Block[{strides, merge},
     ConfirmAssert[self["Dimension"] == Times @@ shape];
-    stides = ShapeStrides[shape];
-    merge = mergeShapeStrides[{{shape, stides}, {self["Shape"], self["Strides"]}}];
+    strides = ShapeStrides[shape];
+    merge = mergeShapeStrides[{{shape, strides}, {self["Shape"], self["Strides"]}}];
     self["Shape"] = shape;
     If[ Length[merge] == 1,
         self["Strides"] = merge[[1, 2]],
 
-        self["Strides"] = stides;
+        self["Strides"] = strides;
         self["Pointer"] = RawMemoryExport @ ConfirmBy[
             NumericArray[
                 RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}],
@@ -167,10 +167,12 @@ reshape[self_, shape_] := Enclose @ Block[{strides, merge},
     self
 ]
 
-cast[self_, type_, OptionsPattern[{Method -> "Coerce"}]] := Enclose[
+cast[self_, type_, OptionsPattern[{Method -> Automatic}]] := Enclose @ With[{
+    method = Replace[OptionValue[Method], Automatic :> If[StringContainsQ[type, "Integer"], "ClipAndRound", "ClipAndCoerce"]]
+},
     self["Size"] = ConfirmBy[$TypeByteCounts[type], IntegerQ];
     self["Type"] = type;
-    self["Pointer"] = RawMemoryExport @ ConfirmBy[NumericArray[RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}], type, OptionValue[Method]], NumericArrayQ];
+    self["Pointer"] = RawMemoryExport @ ConfirmBy[NumericArray[RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}], type, method], NumericArrayQ];
     self
 ]
 
@@ -203,4 +205,11 @@ reduce[f_, self_, lvl_, OptionsPattern[{"KeepDims" -> False}]] := Enclose @ Bloc
     self
 ]
 
-StridedArray[data_, args___] := StridedArray@ "$New"[If[ArrayQ[data], NumericArray[data], data], args]
+StridedArray[data_, args___] := StridedArray @ "$New"[
+    Which[
+        ArrayQ[data], NumericArray[data],
+        StridedArray["$Test"][data], Replace[Normal[data], x_ ? ArrayQ :> NumericArray[x]],
+        True, data
+    ],
+    args
+]
