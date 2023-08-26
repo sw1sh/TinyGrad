@@ -16,8 +16,7 @@ OpFunctionMap = <|
     "ADD" -> Plus, "SUB" -> Subtract, "MUL" -> Times, "DIV" -> Divide,
     "SUM" -> Function[{x, lvl}, x["$Extend"]["Sum"[lvl, "KeepDims" -> True]]],
     "MAX" -> Function[{x, lvl}, x["$Extend"]["Max"[lvl, "KeepDims" -> True]]],
-    "RESHAPE" -> ArrayReshape,
-    "SHRINK" -> Function[{x, arg}, x[[Sequence @@ Span @@@ arg]]],
+    "CMPLT" -> Less,
 
     "NOOP" -> Function[{x}, x],
     "EXP2" -> (2 ^ # &),
@@ -27,6 +26,8 @@ OpFunctionMap = <|
     "MAXIMUM" -> Max, "CMPEQ" -> Equal,
     "SQRT" -> Sqrt,
 
+    "RESHAPE" -> ArrayReshape,
+    "SHRINK" -> Function[{x, shrink}, x[[Sequence @@ Span @@@ (shrink + Threaded[{1, 0}])]]],
     "PERMUTE" -> Transpose, "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, x["$Extend"]["Expand"[shape]]],
     "STRIDE" -> Function[{x, strides}, x[[Sequence @@ (;; ;; # & /@ strides)]]],
     "MULACC" -> EinsteinSummation,

@@ -77,12 +77,48 @@ Class["Sin" -> TensorFunction,
     "Backward"[self_, grad_] :> (self["x"]["ConstLike"[Pi / 2]] - self["x"])["UnaryOp"["SIN"]] * grad
 ]
 
+Class["ReLU" -> TensorFunction,
+    "Forward"[self_, x_] :> (self["Output"] = x["BinaryOp"["MAXIMUM", x["ConstLike"[0]]]]),
+    "Backward"[self_, grad_] :> (self["Output"]["ConstLike"[0]] < self["Output"]) * grad
+]
+
+Class["Log" -> TensorFunction,
+    "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp"["LOG2"]] * x["ConstLike"[Log[2]]]),
+    "Backward"[self_, grad_] :> grad / self["x"]
+]
+
+Class["Exp" -> TensorFunction,
+    "Forward"[self_, x_] :> (self["Output"] = (x * x["ConstLike"[1 / Log[2]]]) @ "UnaryOp"["EXP2"]),
+    "Backward"[self_, grad_] :> self["Output"] * grad
+]
+
+Class["Sqrt" -> TensorFunction,
+    "Forward"[self_, x_] :> (self["Output"] = x["UnaryOp"["SQRT"]]),
+    "Backward"[self_, grad_] :> grad / (self["Output"] * self["Output"]["ConstLike"[2]])
+]
+
 Class["Sum" -> TensorFunction,
     "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{lvl = OptionValue[{opts}, "Level"]},
         self["InputShape"] = x["Shape"];
         x["ReduceOp"["SUM", lvl]]
     ],
     "Backward"[self_, grad_] :> grad["Expand"[self["InputShape"]]]
+]
+
+Class["Max" -> TensorFunction,
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{lvl = OptionValue[{opts}, "Level"]},
+        {self["x"], self["Output"]} = {x, x["ReduceOp"["MAX", lvl]]};
+        self["Output"]
+    ],
+    "Backward"[self_, grad_] :> Block[{max, div},
+        max = self["x"] @ "ConstLike"[1.0] - (self["x"] < self["Output"] @ "Expand"[self["x"] @ "Shape"]);
+        div = max @* "ReduceOp"["SUM", grad @ "Shape"] @* "Expand"[self["x"] @ "Shape"];
+        (max / dim) * grad @ "Expand"[self["x"] @ "Shape"]
+    ]
+]
+
+Class["Less" -> TensorFunction,
+    "Forward"[self_, x_, y_] :> (x < y)
 ]
 
 Class["Reshape" -> TensorFunction,
@@ -109,18 +145,18 @@ Class["Permute" -> TensorFunction,
 ]
 
 Class["Pad" -> TensorFunction,
-    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{pad = OptionValue[{opts}, "Padding"]},
-        self["Padding"] = MapThread[#2[[1]] + {0, #1} &, {x["Shape"], pad}];
-        x @ "Pad"[pad]
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{padding = OptionValue[{opts}, "Padding"]},
+        self["Padding"] = MapThread[#2[[1]] + {0, #1} &, {x["Shape"], padding}];
+        x @ "Pad"[padding]
     ],
     "Backward"[self_, grad_] :> grad @ "Shrink"[self["Padding"]]
 ]
 
 Class["Shrink" -> TensorFunction,
-    "Forward"[self_, x_, shrink : {{_Integer, _Integer} ...}] :> (
+    "Forward"[self_, x_, opts : OptionsPattern[]] :> With[{shrink = OptionValue[{opts}, "Shrink"]},
         self["Padding"] = MapThread[{0, #1}  + {1, -1} * #2 &, {x["Shape"], shrink}];
         x @ "Shrink"[shrink]
-    ),
+    ],
     "Backward"[self_, grad_] :> grad @ "Pad"[self["Padding"]]
 ]
 

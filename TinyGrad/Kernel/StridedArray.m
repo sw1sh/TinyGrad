@@ -58,10 +58,15 @@ Class[StridedArray,
 
         ArrayReshape[self, args___] ^:= reshape[StridedArray[self], args];
 
+        ArrayPad[self, args___] ^:= pad[StridedArray[self], args];
+
+        Part[self, args___] ^:= part[StridedArray[self], args];
+
         Cast[self, args___] ^:= cast[StridedArray[self], args];
 
         Transpose[self, args___] ^:= StridedArray[self]["Transpose"[args]];
 
+        Less[self, other_] ^:= StridedArray[self]["Less"[other]];
 
         self
     ],
@@ -98,9 +103,13 @@ Class[StridedArray,
 	        Array[FromRawPointer[pointer, Total[strides * ({##} - 1)]] &, shape]
         ]
     *)
-    "$Normal"[self_] :> Enclose @ With[{pointer = self["Pointer"], shape = self["Shape"], strides = self["Strides"]},
+    "$Normal"[self_] :> Enclose @ Block[{pointer = self["Pointer"], shape = self["Shape"], strides = self["Strides"], dim = self["Dimension"], perm},
         ConfirmAssert[Length[shape] === Length[strides]];
-        Array[RawMemoryRead[pointer, Total[strides ({##} - 1)]] &, shape]
+        perm = Quiet @ FindPermutation[ShapeStrides[shape], strides];
+        If[ MatchQ[perm, _Cycles],
+            Normal @ If[NumericArrayQ[#], Transpose[#, perm], #] & @ ArrayReshape[Confirm @ RawMemoryImport[pointer, {"NumericArray", dim}], Permute[shape, InversePermutation[perm]]],
+            Array[RawMemoryRead[pointer, ({##} - 1) . strides] &, shape]
+        ]
     ],
     "NumericArray"[self_] :> RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}],
 
@@ -125,7 +134,9 @@ Class[StridedArray,
     "Sum"[self_, lvl_, opts : OptionsPattern[]] :> reduce[Total, self, lvl, opts],
     "Max"[self_, lvl_, opts : OptionsPattern[]] :> reduce[Max, self, lvl, opts],
 
-    f_String[self_] /; MemberQ[Attributes[Evaluate @ Symbol[f]], NumericFunction] :> elementwise[ElementwiseLayer[Symbol[f]], self],
+    "Less"[self_, other_] :> elementwise[Less, self, {}, {other}],
+
+    f_String[self_] /; MemberQ[Attributes[Evaluate @ Symbol[f]], NumericFunction] :> elementwise[Symbol[f], self],
 
     "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
     "Arange"[n : _Integer ? NonNegative | Automatic : Automatic, shape : Shape | Automatic : Automatic] :> With[{dim = Times @@ shape},
@@ -151,19 +162,31 @@ reshape[self_, shape_] := Enclose @ Block[{strides, merge},
     ConfirmAssert[self["Dimension"] == Times @@ shape];
     strides = ShapeStrides[shape];
     merge = mergeShapeStrides[{{shape, strides}, {self["Shape"], self["Strides"]}}];
-    self["Shape"] = shape;
+
     If[ Length[merge] == 1,
         self["Strides"] = merge[[1, 2]],
 
-        self["Strides"] = strides;
         self["Pointer"] = RawMemoryExport @ ConfirmBy[
-            NumericArray[
-                RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}],
-                self["Type"]
-            ],
+            Flatten @ NumericArray[Replace[Normal[self], x_ ? NumericQ :> {x}], self["Type"]],
             NumericArrayQ
         ];
+        self["Strides"] = strides;
     ];
+    self["Shape"] = shape;
+    self
+]
+
+part[self_, args___] := Enclose @ With[{array = NumericArray[PartLayer[{args}] @ Normal[self], self["Type"]]},
+    self["Pointer"] = RawMemoryExport @ Flatten @ array;
+    self["Shape"] = Dimensions[array];
+    self["Strides"] = ShapeStrides[self["Shape"]];
+    self
+]
+
+pad[self_, padding_] := Enclose @ With[{array = NumericArray[PaddingLayer[padding] @ Normal[self], self["Type"]]},
+    self["Pointer"] = RawMemoryExport @ Flatten @ array;
+    self["Shape"] = Dimensions[array];
+    self["Strides"] = ShapeStrides[self["Shape"]];
     self
 ]
 
@@ -182,7 +205,7 @@ elementwise[f_, self_, largs_, rargs_] := Enclose @ Block[{
     inputs, result
 },
     inputs = Join[arrayLArgs, {Normal @ self}, arrayRArgs];
-    result = NumericArray @ Flatten @ Confirm @ FunctionLayer[Apply[f]][inputs];
+    result = NumericArray @ Flatten @ {Confirm @ FunctionLayer[Apply[f]][inputs]};
     self["Pointer"] = RawMemoryExport @ result;
     self["Type"] = NumericArrayType[result];
     self["Strides"] = ShapeStrides[self["Shape"]];
@@ -193,7 +216,7 @@ reduce[f_, self_, lvl_, OptionsPattern[{"KeepDims" -> False}]] := Enclose @ Bloc
     keepDims = OptionValue["KeepDims"],
     result
 },
-    result = Confirm @ AggregationLayer[f, Replace[lvl, l_Integer :> ;; l]][Normal[self]];
+    result = Confirm @ AggregationLayer[f, Replace[lvl, {l_Integer :> ;; l, lvls : {{_Integer}...} :> Catenate[lvls]}]][Normal[self]];
     result = If[NumericQ[result], NumericArray[{result}], NumericArray[Flatten[result]]];
     self["Pointer"] = RawMemoryExport @ result;
     If[ keepDims,

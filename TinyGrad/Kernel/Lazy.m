@@ -10,7 +10,6 @@ Class[LazyBuffer,
     "$Init"[self_, device_String, st_::[ShapeTracker], op_::[LazyOp], type_String, src_ : None] :> (
         {self["ShapeTracker"], self["Device"], self["Op"], self["Type"], self["Realized"]} = {st, device, op, type, src};
         self["OutputBuffer"] = None;
-        self["Children"] = {};
         self["Op"] = op;
 
         Plus[self, y_] ^:= ElementwiseOp["ADD", self, y];
@@ -19,7 +18,8 @@ Class[LazyBuffer,
         Divide[self, y_] ^:= ElementwiseOp["DIV", self, y];
         Power[self, y_] ^:= ElementwiseOp["EXP2", ElementwiseOp["MUL", y, ElementwiseOp["LOG2", self]]];
         Minus[self] ^:= ElementwiseOp["SUB", 0, self];
-
+        Less[self, y_] ^:= ElementwiseOp["CMPLT", self, y];
+        Greater[self, y_] ^:= ElementwiseOp["CMPLT", y, self];
         self
     ),
     "$StaticMethods" -> {"FromCPU", "LoadOp"},
@@ -104,6 +104,22 @@ LazyBuffer["Reshape"[self_, shape_]] := (
     LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
 )
 
+LazyBuffer["Pad"[self_, padding_ : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := (
+    If[ MatchQ[padding, {{0, 0} ...}], Return[self]];
+    If[ self["Realized"] =!= None && self["OpName"] === "PAD",
+        Return[self["Op"]["Source"][[1]]["Pad"[self["Op"]["Argument"] + padding]]]
+    ];
+    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Pad"[padding], LazyOp["PAD", {self}, padding], self["Type"]]
+)
+
+LazyBuffer["Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := (
+    If[ ReverseApplied[Subtract] @@@ shrink === shape, Return[self]];
+    If[ self["Realized"] =!= None && self["OpName"] === "SHRINK",
+        Return[self["Op"]["Source"][[1]]["Shrink"[self["Op"]["Argument"][[All, 1]] + shrink]]]
+    ];
+    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Shrink"[shrink], LazyOp["SHRINK", {self}, shrink], self["Type"]]
+)
+
 LazyBuffer["Buffers"[self_]] := {self}
 
 LazyBuffer["$Format"[self_, form_]] :=
@@ -117,7 +133,7 @@ LazyBuffer["$Format"[self_, form_]] :=
             BoxForm`SummaryItem[{"Op: ", self["Op"]}],
             BoxForm`SummaryItem[{"Realized: ", self["Realized"] =!= None}]
         },
-        {{}},
+        {BoxForm`SummaryItem[{"ShapeTracker: ", self["ShapeTracker"]}]},
         form
     ]
 

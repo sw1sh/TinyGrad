@@ -3,6 +3,7 @@ Package["TinyGrad`"]
 PackageExport[NameValuePattern]
 PackageScope[CoIdentity]
 PackageScope[LevelSpan]
+PackageScope[AxisPart]
 
 
 
@@ -16,19 +17,23 @@ Interval /: QuotientRemainder[m_Interval, n_] := {Quotient[m, n], Mod[m, n]}
 Protect[Interval];
 
 
-LevelSpan = Replace[{{from_, to_} :> from ;; to, {n_} :> {n}, n_ :> ;; n}]
+LevelSpan = Replace[{{from_Integer, to_Integer} :> from ;; to, {n_Integer} :> {n}, n_Integer :> ;; n}]
 
+AxisPart[i_] := If[i < 0, i, i + 1]
 
 Splits[list_List] := TakeDrop[list, #] & /@ Range[0, Length[list]]
 
-NameValuePattern[args : _Pattern..., kwargs : PatternSequence[(Optional | Rule | RuleDelayed)[_Pattern, ___]...]] :=
+NameValuePattern[] = PatternSequence[];
+
+NameValuePattern[args : _Pattern..., kwargs : PatternSequence[(Optional | Rule | RuleDelayed)[_Pattern, ___]...]] := With[{
+	names = Cases[Unevaluated[{args, kwargs}], Verbatim[Pattern][sym_Symbol, _] | (Optional | Rule | RuleDelayed)[Verbatim[Pattern][sym_Symbol, _], ___] :> SymbolName[Unevaluated[sym]]]},
     PatternSequence[
         PatternSequence @@ Replace[#1, {
             Verbatim[Optional][Verbatim[Pattern][name_Symbol, p_]] :>
-				With[{opt = Pattern @@ Hold[name, Except[_Rule| _RuleDelayed, p]]}, HoldPattern[Optional[opt, Sequence[]]]],
+				With[{opt = Pattern @@ Hold[name, Except[(Rule| RuleDelayed)[Alternatives @@ names, _], p]]}, HoldPattern[Optional[opt, Sequence[]]]],
             (Optional | Rule | RuleDelayed)[Verbatim[Pattern][name_Symbol, p_], def_] :>
-				With[{opt = Pattern @@ Hold[name, Except[_Rule| _RuleDelayed, p]]}, HoldPattern[Optional[opt, def]]],
-            Verbatim[Pattern][name_Symbol, p_] :> Pattern @@ Hold[name, Except[_Rule| _RuleDelayed, p]]
+				With[{opt = Pattern @@ Hold[name, Except[(Rule| RuleDelayed)[Alternatives @@ names, _], p]]}, HoldPattern[Optional[opt, def]]],
+            Verbatim[Pattern][name_Symbol, p_] :> Pattern @@ Hold[name, Except[(Rule| RuleDelayed)[Alternatives @@ names, _], p]]
         },
             {1}
         ],
@@ -48,5 +53,6 @@ NameValuePattern[args : _Pattern..., kwargs : PatternSequence[(Optional | Rule |
         (PatternSequence | OrderlessPatternSequence)[(PatternSequence | OrderlessPatternSequence)[mid___]] :> OrderlessPatternSequence[mid]
 	} /. (* naming sequences are not necessary, but it helps to avoid a bug in the pattern matcher *)
 		o_OrderlessPatternSequence :> $kwargs : o /. p_PatternSequence :> $args : p //
-        Longest
+		Longest
+]
 

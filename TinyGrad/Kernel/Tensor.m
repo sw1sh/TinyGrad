@@ -38,6 +38,14 @@ Class[Tensor,
         Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
         Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
         Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
+
+        Less[self, t_] ^:= self["Broadcast"["Less", t, "Reverse" -> False]];
+        Greater[self, t_] ^:= self["Broadcast"["Less", t, "Reverse" -> True]];
+        LessEqual[self, t_] ^:= 1 - (self > t);
+        GreaterEqual[self, t_] ^:= 1 - (self < t);
+        Unequal[self, t_] ^:= (self < t) + (self > t);
+        Equal[self, t_] ^:= 1 - (self != t);
+
         Dot[self, w_] ^:= Enclose @ Block[{shape1 = self["Shape"], shape2 = w["Shape"], n1 = self["Rank"], n2 = w["Rank"], i, x, y},
             i = - Min[n2, 2];
             ConfirmAssert[n1 > 0 && n2 > 0];
@@ -47,7 +55,26 @@ Class[Tensor,
             (x * y) @ "Sum"[-1]
         ];
 
-        Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i, j], order_ :> "Permute"[order]}]];
+        Accumulate[self, axis_Integer : 0] ^:= self @* "Transpose"[axis, -1] @* "Pad2D"[{self["Shape"][[AxisPart[axis]]] - 1, 0}] @* "Pool"[{self["Shape"][[AxisPart[axis]]]}] @* "Sum"[{-1}] @* "Transpose"[axis, -1];
+
+        Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i - 1, j - 1], order_ :> "Permute"[order]}]];
+
+        Part[self, args___] ^:= Enclose @ Block[{shape = self["Shape"], shrink, axes, result},
+            axes = First[Reap[shrink = MapIndexed[
+                Confirm @ Replace[#1, {
+                    Span[i_Integer ? Positive, j_Integer ? Positive] -> {i - 1, j},
+                    i_Integer ? Positive :> (Sow[#2]; {i - 1, i}),
+                    All -> {0, shape[[#2[[1]]]]},
+                    _ -> $Failed
+                }] &,
+                PadRight[{args}, Length[shape], All]
+            ]][[2]], {}];
+            result = TensorFunction["Shrink"] @ "Apply"[self, "Shrink" -> shrink];
+            If[ Length[axes] > 0,
+                TensorFunction["Reshape"] @ "Apply"[result, "Shape" -> Delete[result["Shape"], axes]],
+                result
+            ]
+        ];
 
         Total[self, lvl_ : 1] ^:=
             TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
@@ -115,14 +142,99 @@ Tensor["Reshape"[self_, shape_]] := TensorFunction["Reshape"] @ "Apply"[self, "S
 
 Tensor["Expand"[self_, shape_]] := TensorFunction["Expand"] @ "Apply"[self, "Shape" -> shape]
 
-Tensor["Pad"[self_, pad : {{_Integer, _Integer} ...}, value_ : 0]] :=
-    TensorFunction["Pad"] @ "Apply"[self, "Padding" -> pad]
+Tensor["Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := If[
+    Or @@ Unequal @@@ Thread[{shrink, {0, #} & /@ self["Shape"]}],
+    TensorFunction["Shrink"] @ "Apply"[self, "Shrink" -> shrink],
+    self
+]
+
+Tensor["Pad"[self_, padding : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}, value_ : 0]] := Enclose @ Block[{result},
+    If[MatchQ[padding, {{0, 0} ...}], Return[self]];
+    result = TensorFunction["Pad"] @ "Apply"[self, "Padding" -> padding];
+    If[value == 0, Return[result]];
+    result + (value - Tensor["Full"[self["Shape"], value]]["Pad"[padding]])
+]
+
+Tensor["Slice"[self_, slice : {({_Integer, _Integer} | All) ...}, value_ : 0]] := Block[{islice, padding, shrink},
+    islice = MapThread[Replace[#1, All :> {0, #2}] &, {slice, self["Shape"]}];
+    padding = MapThread[{Max[0, - #1[[1]]], Max[0, #1[[2]] - #2]} &, {islice, self["Shape"]}];
+    shrink = islice + padding[[All, 1]];
+    self @* "Pad"[padding, value] @* "Shrink"[shrink]
+]
+
+Tensor["Pad2D"[self_, padding : {_Integer ...}, value_ : 0]] := Enclose @ Block[{slice, n = Quotient[Length[padding], 2]},
+    slice = Reverse @ MapThread[{- #1, #2 + #3} &, {padding[[;; ;; 2]], padding[[2 ;; ;; 2]], Reverse[Take[self["Shape"], - n]]}];
+    self @ "Slice"[Join[Thread[{0, Drop[self["Shape"], - n]}], slice], value]
+]
+
+Tensor["Pool"[self_, k : {__Integer}, stride : _Integer | {__Integer} : 1, dilation : _Integer | {__Integer} : 1]] := Enclose @ Block[{
+    shape = self["Shape"], rank = self["Rank"], kRank = Length[k], pRank,
+    prefix, slicePrefix, i,
+    s, d, o, e, xup
+},
+    ConfirmAssert[rank >= kRank];
+
+    s = Replace[stride, i_Integer :> ConstantArray[i, kRank]];
+    d = Replace[dilation, i_Integer :> ConstantArray[i, kRank]];
+    ConfirmAssert[kRank == Length[s] && kRank == Length[d]];
+
+    prefix = shape[[;; - kRank - 1]];
+    slicePrefix = Thread[{0, prefix}];
+    i = shape[[- kRank ;;]];
+    pRank = rank - kRank;
+
+    If[ Or @@ Thread[k > s] || AnyTrue[d, # != 1 &],
+        o = Quotient[i - d * (k - 1) - 1, s] + 1;
+        e = Ceiling[k * (i + d) / i];
+
+        xup = self @* "Reshape"[Join[prefix, Catenate @ Thread[{1, i}]]] @* "Expand"[Join[prefix, Catenate @ Thread[{e, i}]]] @* "Reshape"[Join[prefix, e * i]];
+        (* slide by dilation *)
+        xup = xup @ "Slice"[Join[slicePrefix, Thread[{0, k * (i + d)}]]];
+        xup = xup @ "Reshape"[Join[prefix, Catenate @ Thread[{k, i + d}]]];
+        xup = xup @ "Slice"[Join[slicePrefix, Catenate[Partition[#, 2] & /@ Thread[{0, k, 0, o * s}]]]];
+        (* handle stride, and permute to move reduce to the end *)
+        xup = xup @ "Reshape"[Join[prefix, Catenate @ Thread[{k, o, s}]]];
+        xup = xup @ "Slice"[Join[slicePrefix, Catenate[Partition[#, 2] & /@ Thread[{0, k, 0, o, 0, 1}]]]];
+        xup = xup @ "Reshape"[Join[prefix, Catenate @ Thread[{k, o}]]];
+
+        Return[xup @ "Permute"[Join[Range[pRank], pRank + 2 * Range[0, kRank - 1] + 1, pRank + 2 * Range[0, kRank - 1]]]]
+    ];
+    o = Quotient[i + (s - k), s];
+    xup = self @ "Slice"[Join[slicePrefix, Thread[{0, o * s}]]];
+    xup = xup @ "Reshape"[Join[prefix, Catenate @ Thread[{o, s}]]];
+    xup = xup @ "Slice"[Join[slicePrefix, Catenate[Partition[#, 2] & /@ Thread[{0, o, 0, k}]]]];
+
+    xup @ "Permute"[Join[Range[pRank], pRank + 2 * Range[0, kRank - 1], pRank + 2 * Range[0, kRank - 1] + 1]]
+]
+
+Tensor["Conv2D"[NameValuePattern[self_, Weight_, Bias_ : None, Groups_ : 1, Stride_ : 1, Dilation_ : 1, Padding_ : 1]]] := Enclose @ Block[{
+    bs, gcin, cout, cin, HW,
+    padding = Padding,
+    x, ret
+},
+    {{bs, gcin}, {cout, cin}, HW} = {self["Shape"][[;; 2]], Weight["Shape"][[;; 2]], Weight["Shape"][[3 ;;]]};
+    ConfirmAssert[Groups * cin == gcin && self["Rank"] == Weight["Rank"]];
+    If[ListQ[padding], ConfirmAssert[Length[padding] == 2 * Length[HW] || Length[padding] == Length[HW]]];
+    padding = Which[
+        IntegerQ[padding],
+        ConstantArray[padding, 2 * Length[HW]],
+        Length[padding] == 2 * Length[HW],
+        padding,
+        True,
+        Reverse @ Catenate[{#, #} & /@ padding]
+    ];
+
+    x = self["Pad2D"[padding]] @ "Pool"[HW, Stride, Dilation];
+    {rcout, oyx} = {Quotient[cout, Groups], x["Shape"][[3 ;; - Length[HW] - 1]]};
+    x = x @* "Reshape"[{bs, Groups, cin, 1, Splice @ oyx, Splice @ HW}] @* "Expand"[{bs, Groups, cin, rcout, Splice @ oyx, Splice @ HW}] @* "Permute"[{0, 1, 3, Splice[3 + Range[Length[oyx]]], 2, 3 + Length[oyx] + Range[Length[HW]]}];
+
+    ret = (x * Weight["Reshape"[{1, Groups, rcout, Splice @ ConstantArray[1, Length[oyx]], cin, Splice @ HW}]]) @* "Sum"[- 1 - Range[0, Length[oyx]], True] @* "Reshape"[{bs, cout, Splice @ oyx}];
+    If[Bias === None, ret, ret + Bias["Reshape"[{1, -1, Splice @ ConstantArray[1, Length[HW]]}]]]
+]
 
 Tensor["Permute"[self_, order_]] := TensorFunction["Permute"] @ "Apply"[self, "Order" -> order]
 
-Tensor["Transpose"[self_, ax1_ : 2, ax2_ : 1]] := self["Permute"[With[{order = Range[self["Rank"]]}, ReplacePart[order, {ax1 -> order[[ax2]], ax2 -> order[[ax1]]}]]]]
-
-Tensor["Eye"[dim_Integer ? Positive, args___]] := Tensor[{1}, args] @* "Pad"[{{0, dim}}] @* "Reshape"[1, dim + 1] @* "Expand"[dim, dim + 1] @* "Reshape"[dim * (dim + 1)] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[dim, dim]
+Tensor["Transpose"[self_, ax1_ : 1, ax2_ : 0]] := self["Permute"[With[{order = Range[self["Rank"]]}, ReplacePart[order, {#1 -> order[[#2]], #2 -> order[[#1]]}] & [AxisPart[ax1], AxisPart[ax2]]]]]
 
 
 Tensor["MatMul"[self_, x_Tensor, reverse_ : False]] := If[reverse, x . self, self . x]
@@ -144,7 +256,7 @@ Tensor["$Format"[self_, form_]] :=
         form
     ]
 
-Tensor["Graph"[self_]] := Block[{edges = {}, visited = {}, deepwalk},
+Tensor["Graph"[self_, opts___]] := Block[{edges = {}, visited = {}, deepwalk},
     deepwalk[node_] := (
         AppendTo[visited, node];
         Scan[If[! MemberQ[visited, #], AppendTo[edges, node -> #]; deepwalk[#]] &, node["Op"]["Source"]];
@@ -154,6 +266,7 @@ Tensor["Graph"[self_]] := Block[{edges = {}, visited = {}, deepwalk},
 
     Graph[
         visited, edges,
+        opts,
         VertexShapeFunction -> Function[
             Inset[Style[
                     If[#2["RealizedQ"], Framed, Identity] @ If[
@@ -186,9 +299,9 @@ Tensor["DeepWalk"[self_]] := Block[{nodes = {}, visited = {}, deepwalk},
     nodes
 ]
 
-Tensor["Backward"[self_]] := Enclose @ Block[{grads},
+Tensor["Backward"[self_, value_ : 1]] := Enclose @ Block[{grads},
     ConfirmAssert[self["Shape"] === {}, "Only scalar gradients are currently supported"];
-    self["Gradient"] = Tensor[1, "Type" -> self["Type"], "Device" -> self["Device"], "RequiresGradient" -> False];
+    self["Gradient"] = Tensor[value, "Type" -> self["Type"], "Device" -> self["Device"], "RequiresGradient" -> False];
     Do[
         If[t0["RequiresGradients"] === False, Continue[]];
         ConfirmAssert[t0["Gradient"] =!= None];
@@ -201,10 +314,11 @@ Tensor["Backward"[self_]] := Enclose @ Block[{grads},
             {t, g} |-> If[g =!= None && t["RequiresGradient"],
                 ConfirmAssert[t["Shape"] === g["Shape"], StringTemplate["Gradient stape must match tensor shape: ``"][t0]];
                 t["Gradient"] = If[t["Gradient"] === None, g, t["Gradient"] + g];
+                t["Gradient"]["Context"] = t0["Context"]
             ],
             {t0["Context"]["Parents"], grads}
         ];
-        (* t0["Context"] =.; *)
+        t0["Context"] =.;
         ,
         {t0, Reverse[self["DeepWalk"[]]]}
     ]
@@ -230,10 +344,27 @@ Tensor["Tan"[self_]] := self@"Sin"[] / self@"Cos"[]
 Tensor[(f : "Sum" | "Max")[self_, args___]] := self["Reduce"[f, args]]
 Tensor["Min"[self_, args___]] := - (- self)["Max"[args]]
 
-Tensor["Broadcast"[self_, f_, others___]] :=
+Tensor["_SoftMax"[self_, axis_]] := Block[{m = self - self @ "Max"[axis, True], e},
+    e = Exp[m];
+    {m, e, e @ "Sum"[axis, True]}
+]
+
+Tensor["SoftMax"[self_, axis_ : -1]] := Block[{e, ss},
+    {e, ss} = self @ "_SoftMax"[axis][[2 ;;]];
+    e / ss
+]
+
+Tensor["LogSoftMax"[self_, axis_ : -1]] := Block[{m, e, ss},
+    {m, e, ss} = self @ "_SoftMax"[axis];
+    m - Log[ss]
+]
+
+
+Tensor["Broadcast"[self_, f_, others___, opts : OptionsPattern[]]] :=
     Fold[
         Block[{x = #1, y = Tensor[#2, #1["Device"], #1["Type"]], shape},
-            If[x["Shape"] === y["Shape"], Return[TensorFunction[f] @ "Apply"[x, y]]];
+            If[TrueQ[OptionValue[{opts, "Reverse" -> False}, "Reverse"]], {x, y} = {y, x}];
+            If[x["Shape"] === y["Shape"], Return[TensorFunction[f] @ "Apply"[x, y], Block]];
             xRank = Length[x["Shape"]];
             yRank = Length[y["Shape"]];
             rank = Max[xRank, yRank];
@@ -249,12 +380,12 @@ Tensor["Broadcast"[self_, f_, others___]] :=
     ]
 
 Tensor["Reduce"[self_, f_, axis_ : None, keepDim_ : False]] := Block[{
-    axes = Developer`ToList @ Replace[axis, None :> Range[Length[self["Shape"]]]],
+    axes = Developer`ToList @ Replace[axis, None :> Range[0, Length[self["Shape"]] - 1]],
     result
 },
-    axes = Replace[axes, i_ /; i < 0 :> i + 1 + Length[self["Shape"]], {1}];
+    axes = 1 + List /@ Replace[axes, i_ /; i < 0 :> i + Length[self["Shape"]], {1}];
     result = TensorFunction[f] @ "Apply"[self, "Level" -> axes];
-    If[keepDim, result, result["Reshape"[Delete[self["Shape"], List /@ axes]]]]
+    If[keepDim, result, result["Reshape"[Delete[self["Shape"], axes]]]]
 ]
 
 StaticMethod[
@@ -286,4 +417,44 @@ Tensor["Uniform"[NameValuePattern[shape : Shape, low_ : -1.0, high_ : 1.0], opts
 StaticMethod[
 Tensor["ScaledUniform"[shape : Shape, args___]] :=
     Tensor["Uniform"[shape, args]] / Sqrt[Times @@ shape]
+]
+
+
+(* Creation *)
+
+StaticMethod[
+Tensor["Full"[shape : Shape, value_, args___]] :=
+    Tensor[value, args] @* "Reshape"[ConstantArray[1, Length[shape]]] @* "Expand"[shape]
+]
+
+StaticMethod[
+Tensor["Zeros"[shape : Shape, args___]] :=
+    Tensor["Full"[shape, 0, args]]
+]
+
+StaticMethod[
+Tensor["Ones"[shape : Shape, args___]] :=
+    Tensor["Full"[shape, 1, args]]
+]
+
+StaticMethod[
+Tensor["Arange"[from_, to_ : None, step_ : 1, args___]] :=
+    Tensor["Full"[{Ceiling[(to - from) / step]}, step, args]] @ "CumSum"[] + (from - step)
+]
+
+StaticMethod[
+Tensor["Eye"[dim_Integer ? Positive, args___]] :=
+    Tensor[{1}, args] @* "Pad"[{{0, dim}}] @* "Reshape"[{1, dim + 1}] @* "Expand"[{dim, dim + 1}] @* "Reshape"[{dim * (dim + 1)}] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[{dim, dim}]
+]
+
+
+(* Functional NN *)
+
+StaticMethod[
+Tensor["SparseCategoricalCrossEntropy"[self_, y_, ignoreIndex_ : -1]] := Block[{
+    lossMask = y != ignoreIndex
+    yCounter = Tensor["Arange"[self["Shape"][[-1 ;;]]]]
+},
+    (**)
+]
 ]

@@ -146,21 +146,17 @@ ViewReshape[view_::[View], newShape : Shape] := Block[{
 ]
 
 
-shapesCompatibleQ[{l_, ls___}, {r_, rs___}] := Which[Divisible[l, r], shapesCompatibleQ[{l / r, ls}, {rs}], Divisible[r, l], shapesCompatibleQ[{ls}, {r / l, rs}], True, False]
-shapesCompatibleQ[{1...}, {}] := True
-shapesCompatibleQ[{}, {1...}] := True
-shapesCompatibleQ[_, _] := False
-
 mergeShapeStrides[ss_] := FixedPoint[
 	SequenceReplace[
-		s : {{shape1_, strides_}, {shape2_, _}} /; shapesCompatibleQ[shape2, shape1[[Reverse @ Ordering[strides]]]] :> {
-			shape1,
-			 Fold[
-                IntegerDigits[#1, MixedRadix[#2[[1]]], Length[#2[[1]]]] . #2[[2]] &,
-                FromDigits[UnitVector[Length[shape1], #], MixedRadix[shape1]],
-                s
-            ] & /@ Range[Length[shape1]] // ReplacePart[Position[shape1, 1] -> 0]
-		}
+		s : {{shape1_, strides1_}, {shape2_, strides2_}} :> With[{
+			newStrides = IntegerDigits[UnitVector[Length[shape1], #] . strides1, MixedRadix[shape2], Length[shape2]] . strides2 & /@ Range[Length[shape1]],
+			dim = Times @@ shape1 - 1
+		},
+            If[ IntegerDigits[dim, MixedRadix[shape1], Length[shape1]] . newStrides == dim,
+                {shape1, ReplacePart[newStrides, Position[shape1, 1] -> 0]},
+                Splice @ ss
+            ]
+		]
 	],
 	ss
 ]
@@ -225,6 +221,38 @@ Class[ShapeTracker,
             ]
         ];
         self
+    ],
+
+    "Resize"[self_, size_, mask_ : None] :> Block[{
+        offset = self["Strides"] . size[[All, 1]],
+        nmask = None
+    },
+        If[ self["Mask"] =!= None,
+            nmask = MapThread[{Max[#1[[1]] - #2[[1]], 0], Min[#1[[2]] - #2[[1]], #2[[2]] - #2[[1]]]} &, {self["Mask"], size}]
+            If[ mask =!= None,
+                nmask = MapThread[{Max[#1[[1]], #2[[1]]], Min[#1[[2]], #2[[2]]]} &, {nmask, mask}]
+            ];
+        ];
+        self["Views"] = ReplacePart[self["Views"],
+            -1 -> View[
+                ReverseApplied[Subtract] @@@ size,
+                self["Strides"],
+                self["Offset"] + offset,
+                nmask
+            ]
+        ];
+        self
+    ],
+
+    "Pad"[self_, padding : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}] :> Enclose[
+        ConfirmAssert[Length[padding] == self["Rank"]];
+        self["Resize"[Thread[{- #1, self["Shape"] + #2}], Thread[{#1, self["Shape"] + #1}]] & @@ Transpose[padding]]
+    ],
+
+    "Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}] :> Enclose[
+        ConfirmAssert[Length[shrink] == self["Rank"]];
+        ConfirmAssert[And @@ MapThread[#2[[1]] >= 0 && #2[[2]] <= #1 &, {self["Shape"], shrink}]];
+        self["Resize"[shrink]]
     ],
 
     "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
