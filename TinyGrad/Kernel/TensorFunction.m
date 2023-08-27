@@ -19,11 +19,11 @@ Class[
     "Forward"[self_, ___] :> Message[TensorFunction::noimpl, "Forward", self],
     "Backward"[self_, ___] :> Message[TensorFunction::noimpl, "Backward", self],
 
-    "Apply"[fxn_, xs : PatternSequence[x_, ___], opts : OptionsPattern[]] :> Block[{
-        ctx = fxn["$New"[x["Device"], xs]], ret
+    "Apply"[fxn_, xs : PatternSequence[x_, ___], opts : OptionsPattern[]] :> Enclose @ Block[{
+        ctx = Confirm @ fxn["$New"[x["Device"], xs]], ret
     },
-        ret = Tensor[
-            ctx["Forward"[Sequence @@ Through[{xs}["LazyData"]], opts]],
+        ret = Confirm @ Tensor[
+            Confirm @ ctx["Forward"[Sequence @@ Through[{xs}["LazyData"]], opts]],
             ctx["Device"],
             ctx["RequiresGradient"]
         ];
@@ -73,28 +73,28 @@ Class["Pow" -> TensorFunction,
 ]
 
 Class["Sin" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp"["SIN"]]),
-    "Backward"[self_, grad_] :> (self["x"]["ConstLike"[Pi / 2]] - self["x"])["UnaryOp"["SIN"]] * grad
+    "Forward"[self_, x_] :> (self["x"] = x; x["Elementwise"["SIN"]]),
+    "Backward"[self_, grad_] :> (self["x"]["Const"[Pi / 2]] - self["x"])["Elementwise"["SIN"]] * grad
 ]
 
 Class["ReLU" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["Output"] = x["BinaryOp"["MAXIMUM", x["ConstLike"[0]]]]),
-    "Backward"[self_, grad_] :> (self["Output"]["ConstLike"[0]] < self["Output"]) * grad
+    "Forward"[self_, x_] :> (self["Output"] = x["Elementwise"["MAXIMUM", x["Const"[0]]]]),
+    "Backward"[self_, grad_] :> (self["Output"]["Const"[0]] < self["Output"]) * grad
 ]
 
 Class["Log" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["x"] = x; x["UnaryOp"["LOG2"]] * x["ConstLike"[Log[2]]]),
+    "Forward"[self_, x_] :> (self["x"] = x; x["Elementwise"["LOG2"]] * x["Const"[Log[2]]]),
     "Backward"[self_, grad_] :> grad / self["x"]
 ]
 
 Class["Exp" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["Output"] = (x * x["ConstLike"[1 / Log[2]]]) @ "UnaryOp"["EXP2"]),
+    "Forward"[self_, x_] :> (self["Output"] = (x * x["Const"[1 / Log[2]]]) @ "Elementwise"["EXP2"]),
     "Backward"[self_, grad_] :> self["Output"] * grad
 ]
 
 Class["Sqrt" -> TensorFunction,
-    "Forward"[self_, x_] :> (self["Output"] = x["UnaryOp"["SQRT"]]),
-    "Backward"[self_, grad_] :> grad / (self["Output"] * self["Output"]["ConstLike"[2]])
+    "Forward"[self_, x_] :> (self["Output"] = x["Elementwise"["SQRT"]]),
+    "Backward"[self_, grad_] :> grad / (self["Output"] * self["Output"]["Const"[2]])
 ]
 
 Class["Sum" -> TensorFunction,
@@ -111,7 +111,7 @@ Class["Max" -> TensorFunction,
         self["Output"]
     ],
     "Backward"[self_, grad_] :> Block[{max, div},
-        max = self["x"] @ "ConstLike"[1.0] - (self["x"] < self["Output"] @ "Expand"[self["x"] @ "Shape"]);
+        max = self["x"] @ "Const"[1.0] - (self["x"] < self["Output"] @ "Expand"[self["x"] @ "Shape"]);
         div = max @* "ReduceOp"["SUM", grad @ "Shape"] @* "Expand"[self["x"] @ "Shape"];
         (max / dim) * grad @ "Expand"[self["x"] @ "Shape"]
     ]
@@ -160,3 +160,11 @@ Class["Shrink" -> TensorFunction,
     "Backward"[self_, grad_] :> grad @ "Pad"[self["Padding"]]
 ]
 
+Class["Where" -> TensorFunction,
+    "Forward"[self_, x_, y_, z_] :> (self["x"] = x; x["Elementwise"["WHERE", y, z]]),
+    "Backward"[self_, grad_] :> {
+        None,
+        If[self["RequiresInputGradient"][[2]], self["x"]["Elementwise"["WHERE", grad, grad["Const"[0]]]], None],
+        If[self["RequiresInputGradient"][[3]], self["x"]["Elementwise"["WHERE", grad["Const"[0]], grad]], None]
+    }
+]

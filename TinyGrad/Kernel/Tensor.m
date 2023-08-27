@@ -35,53 +35,7 @@ Class[Tensor,
             self["Context"] = None
         ];
 
-        Plus[self, ts___] ^:= self["Broadcast"["Add", ts]];
-        Times[self, ts___] ^:= self["Broadcast"["Mul", ts]];
-        Power[self, ts___] ^:= self["Broadcast"["Pow", ts]];
-
-        Less[self, t_] ^:= self["Broadcast"["Less", t, "Reverse" -> False]];
-        Greater[self, t_] ^:= self["Broadcast"["Less", t, "Reverse" -> True]];
-        LessEqual[self, t_] ^:= 1 - (self > t);
-        GreaterEqual[self, t_] ^:= 1 - (self < t);
-        Unequal[self, t_] ^:= (self < t) + (self > t);
-        Equal[self, t_] ^:= 1 - (self != t);
-
-        Dot[self, w_] ^:= Enclose @ Block[{shape1 = self["Shape"], shape2 = w["Shape"], n1 = self["Rank"], n2 = w["Rank"], i, x, y},
-            i = - Min[n2, 2];
-            ConfirmAssert[n1 > 0 && n2 > 0];
-            ConfirmAssert[shape1[[-1]] === shape2[[i]]];
-            x = self @ "Reshape"[Join[shape1[[;; -2]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape1[[-1 ;;]]]];
-            y = w @* "Reshape"[Join[shape2[[;; -3]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape2[[i ;; ]]]] @* "Transpose"[-1, i];
-            (x * y) @ "Sum"[-1]
-        ];
-
-        Accumulate[self, axis_Integer : 0] ^:= self @* "Transpose"[axis, -1] @* "Pad2D"[{self["Shape"][[AxisPart[axis]]] - 1, 0}] @* "Pool"[{self["Shape"][[AxisPart[axis]]]}] @* "Sum"[{-1}] @* "Transpose"[axis, -1];
-
-        Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i - 1, j - 1], order_ :> "Permute"[order]}]];
-
-        Part[self, args___] ^:= Enclose @ Block[{shape = self["Shape"], shrink, axes, result},
-            axes = First[Reap[shrink = MapIndexed[
-                Confirm @ Replace[#1, {
-                    Span[i_Integer ? Positive, j_Integer ? Positive] -> {i - 1, j},
-                    i_Integer ? Positive :> (Sow[#2]; {i - 1, i}),
-                    All -> {0, shape[[#2[[1]]]]},
-                    _ -> $Failed
-                }] &,
-                PadRight[{args}, Length[shape], All]
-            ]][[2]], {}];
-            result = TensorFunction["Shrink"] @ "Apply"[self, "Shrink" -> shrink];
-            If[ Length[axes] > 0,
-                TensorFunction["Reshape"] @ "Apply"[result, "Shape" -> Delete[result["Shape"], axes]],
-                result
-            ]
-        ];
-
-        Total[self, lvl_ : 1] ^:=
-            TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
-
-        D[self, t_] ^:= Enclose[Confirm @ self["Backward"[]]; t["Gradient"]];
-
-        f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
+        SetUpValues[self];
 
         If[ LazyBuffer["$Test"][data],
             ConfirmAssert[Type === None || type === data["Type"]];
@@ -107,6 +61,56 @@ Class[Tensor,
         |>]
     ]
 ]
+
+SetUpValues[self_] := (
+    Plus[self, ts___] ^:= Fold[TensorFunction["Add"] @ ("Apply" @@ #1["Broadcast"[#2]]) &, self, {ts}];
+    Times[self, ts___] ^:= Fold[TensorFunction["Mul"] @ ("Apply" @@ #1["Broadcast"[#2]]) &, self, {ts}];
+    Power[self, ts___] ^:= Fold[TensorFunction["Pow"] @ ("Apply" @@ #1["Broadcast"[#2]]) &, self, {ts}];
+
+    Less[self, t_] ^:= TensorFunction["Less"] @ ("Apply" @@ self["Broadcast"[t, "Reverse" -> False]]);
+    Greater[self, t_] ^:= TensorFunction["Less"] @ ("Apply" @@ self["Broadcast"[t, "Reverse" -> True]]);
+    LessEqual[self, t_] ^:= 1 - (self > t);
+    GreaterEqual[self, t_] ^:= 1 - (self < t);
+    Unequal[self, t_] ^:= (self < t) + (self > t);
+    Equal[self, t_] ^:= 1 - (self != t);
+
+    Dot[self, w_] ^:= Enclose @ Block[{shape1 = self["Shape"], shape2 = w["Shape"], n1 = self["Rank"], n2 = w["Rank"], i, x, y},
+        i = - Min[n2, 2];
+        ConfirmAssert[n1 > 0 && n2 > 0];
+        ConfirmAssert[shape1[[-1]] === shape2[[i]]];
+        x = self @ "Reshape"[Join[shape1[[;; -2]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape1[[-1 ;;]]]];
+        y = w @* "Reshape"[Join[shape2[[;; -3]], ConstantArray[1, Min[n1 - 1, n2 - 1, 1]], shape2[[i ;; ]]]] @* "Transpose"[-1, i];
+        (x * y) @ "Sum"[-1]
+    ];
+
+    Accumulate[self, axis_Integer : 0] ^:= self @* "Transpose"[axis, -1] @* "Pad2D"[{self["Shape"][[AxisPart[axis]]] - 1, 0}] @* "Pool"[{self["Shape"][[AxisPart[axis]]]}] @* "Sum"[{-1}] @* "Transpose"[axis, -1];
+
+    Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i - 1, j - 1], order_ :> "Permute"[order]}]];
+
+    Part[self, args___] ^:= Enclose @ Block[{shape = self["Shape"], shrink, axes, result},
+        axes = First[Reap[shrink = MapIndexed[
+            Confirm @ Replace[#1, {
+                Span[i_Integer ? Positive, j_Integer ? Positive] -> {i - 1, j},
+                i_Integer ? Positive :> (Sow[#2]; {i - 1, i}),
+                All -> {0, shape[[#2[[1]]]]},
+                _ -> $Failed
+            }] &,
+            PadRight[{args}, Length[shape], All]
+        ]][[2]], {}];
+        result = TensorFunction["Shrink"] @ "Apply"[self, "Shrink" -> shrink];
+        If[ Length[axes] > 0,
+            TensorFunction["Reshape"] @ "Apply"[result, "Shape" -> Delete[result["Shape"], axes]],
+            result
+        ]
+    ];
+
+    Total[self, lvl_ : 1] ^:=
+        TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
+
+    D[self, t_] ^:= Enclose[Confirm @ self["Backward"[]]; t["Gradient"]];
+
+    f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
+)
 
 Tensor[args___] := Tensor["$New"[args]]
 
@@ -139,6 +143,12 @@ Tensor["To"[self_, device_]] := With[{ret = Tensor[self["LazyData"], device]},
 
 
 Tensor["Reshape"[self_, shape_]] := TensorFunction["Reshape"] @ "Apply"[self, "Shape" -> Replace[shape, -1 :> - self["Dimension"] / Times @@ shape, {1}]]
+
+Tensor["Unsqueeze"[self_, axis_Integer : 0]] := self["Reshape"[Join[self["Shape"][[;; AxisPart[axis] - 1]], {1}, self["Shape"][[AxisPart[axis] ;;]]]]]
+
+Tensor["Squeeze"[self_, axis : _Integer | {___Integer} | None : None]] := self["Reshape"[Delete[self["Shape"], List /@ Developer`ToList @ Replace[axis, None :> Catenate @ Position[self["Shape"], 1]]]]]
+
+Tensor["Flatten"[self_, axis_ : 0]] := self["Reshape"[Append[-1] @ self["Shape"][[;; AxisPart[axis] - 1]]]]
 
 Tensor["Expand"[self_, shape_]] := TensorFunction["Expand"] @ "Apply"[self, "Shape" -> shape]
 
@@ -238,6 +248,12 @@ Tensor["Transpose"[self_, ax1_ : 1, ax2_ : 0]] := self["Permute"[With[{order = R
 
 
 Tensor["MatMul"[self_, x_Tensor, reverse_ : False]] := If[reverse, x . self, self . x]
+
+Tensor["Where"[self_, input_, other_]] := Block[{x, y, z},
+    {x, y} = self["Broadcast"[input]];
+    {x, z} = x["Broadcast"[other]];
+    TensorFunction["Where"] @ ("Apply"[x, ##] & @@ y @ "Broadcast"[z])
+]
 
 Tensor["$Format"[self_, form_]] :=
     BoxForm`ArrangeSummaryBox[
@@ -360,23 +376,23 @@ Tensor["LogSoftMax"[self_, axis_ : -1]] := Block[{m, e, ss},
 ]
 
 
-Tensor["Broadcast"[self_, f_, others___, opts : OptionsPattern[]]] :=
-    Fold[
-        Block[{x = #1, y = Tensor[#2, #1["Device"], #1["Type"]], shape},
-            If[TrueQ[OptionValue[{opts, "Reverse" -> False}, "Reverse"]], {x, y} = {y, x}];
-            If[x["Shape"] === y["Shape"], Return[TensorFunction[f] @ "Apply"[x, y], Block]];
-            xRank = Length[x["Shape"]];
-            yRank = Length[y["Shape"]];
-            rank = Max[xRank, yRank];
-            If[xRank =!= rank, x = x["Reshape"[Join[ConstantArray[1, rank - xRank], x["Shape"]]]]];
-            If[yRank =!= rank, y = y["Reshape"[Join[ConstantArray[1, rank - yRank], y["Shape"]]]]];
-            shape = MapThread[Max, {x["Shape"], y["Shape"]}];
-            If[x["Shape"] =!= shape, x = x["Expand"[shape]]];
-            If[y["Shape"] =!= shape, y = y["Expand"[shape]]];
-            TensorFunction[f] @ "Apply"[x, y]
-        ] &,
-        self,
-        {others}
+Tensor["Broadcast"[self_, other_, opts : OptionsPattern[]]] := Enclose @ Block[{
+    x = self,
+    y = If[Tensor["$Test"][other], other, Confirm @ Tensor[other, self["Device"], self["Type"]]],
+    xShape, yShape, shape
+},
+        If[TrueQ[OptionValue[{opts, "Reverse" -> False}, "Reverse"]], {x, y} = {y, x}];
+        If[(xShape = x["Shape"]) === (yShape = y["Shape"]), Return[{x, y}, Block]];
+        shapeDelta = Length[xShape] - Length[yShape];
+        Which[
+            shapeDelta > 0, y = y["Reshape"[Join[ConstantArray[1, shapeDelta], yShape]]],
+            shapeDelta < 0, x = x["Reshape"[Join[ConstantArray[1, - shapeDelta], xShape]]]
+        ];
+        If[(xShape = x["Shape"]) === (yShape = y["Shape"]), Return[{x, y}, Block]];
+        shape = MapThread[Max, {xShape, yShape}];
+        If[xShape =!= shape, x = x["Expand"[shape]]];
+        If[yShape =!= shape, y = y["Expand"[shape]]];
+        {x, y}
     ]
 
 Tensor["Reduce"[self_, f_, axis_ : None, keepDim_ : False]] := Block[{
@@ -438,8 +454,10 @@ Tensor["Ones"[shape : Shape, args___]] :=
 ]
 
 StaticMethod[
-Tensor["Arange"[from_, to_ : None, step_ : 1, args___]] :=
-    Tensor["Full"[{Ceiling[(to - from) / step]}, step, args]] @ "CumSum"[] + (from - step)
+Tensor["Arange"[From_Integer, To : _Integer | None : None, step_Integer : 1, args___]] := Block[{from, to},
+    {from, to} = If[To === None, {0, From}, {From, To}];
+    Accumulate[Tensor["Full"[{Ceiling[(to - from) / step]}, step, args]]] + (from - step)
+]
 ]
 
 StaticMethod[
@@ -451,10 +469,12 @@ Tensor["Eye"[dim_Integer ? Positive, args___]] :=
 (* Functional NN *)
 
 StaticMethod[
-Tensor["SparseCategoricalCrossEntropy"[self_, y_, ignoreIndex_ : -1]] := Block[{
-    lossMask = y != ignoreIndex
-    yCounter = Tensor["Arange"[self["Shape"][[-1 ;;]]]]
+Tensor["SparseCategoricalCrossEntropy"[self_, Y_, ignoreIndex_ : -1]] := Block[{
+    lossMask = Y != ignoreIndex,
+    yCounter = Tensor["Arange"[self["Shape"][[-1]], "Type" -> "Integer32", "Device" -> self["Device"], "RequiresGradient" -> False]] @* "Unsqueeze"[0] @* "Expand"[{Y["Dimension"], self["Shape"][[-1]]}],
+    y
 },
-    (**)
+    y = ((yCounter == Y @* "Flatten"[] @* "Reshape"[{-1, 1}]) @ "Where"[-1, 0] * lossMask @ "Reshape"[{-1, 1}]) @ "Reshape"[Append[Y["Shape"], self["Shape"][[-1]]]];
+    (self["LogSoftMax"[]] * y)["Sum"[]] / lossMask["Sum"[]]
 ]
 ]

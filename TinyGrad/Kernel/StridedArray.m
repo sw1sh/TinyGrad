@@ -138,6 +138,8 @@ Class[StridedArray,
 
     f_String[self_] /; MemberQ[Attributes[Evaluate @ Symbol[f]], NumericFunction] :> elementwise[Symbol[f], self],
 
+    "Where"[self_, x_, y_] :> elementwise[If[#1 != 0, #2, #3] &, self, {}, {x, y}],
+
     "Empty"[size_, type_] :> StridedArray[NumericArray[ConstantArray[0, size], type]],
     "Arange"[n : _Integer ? NonNegative | Automatic : Automatic, shape : Shape | Automatic : Automatic] :> With[{dim = Times @@ shape},
         StridedArray[ArrayReshape[PadRight[Range @ Replace[n, Automatic -> dim], dim], shape], ShapeStrides[shape]]

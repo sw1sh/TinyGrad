@@ -57,7 +57,7 @@ LazyBuffer["LoadOp"[op_, shape_, type_, device_, arg_ : None, src_ : None]] :=
 LazyBuffer["FromCPU"[x : _ ? NumericArrayQ]] :=
     LazyBuffer["CPU", ShapeTracker[Dimensions[x], {View[Dimensions[x]]}], LazyOp["EMPTY", {}], NumericArrayType[x], RawArrayBuffer["FromCPU"[x]]]
 
-LazyBuffer["ConstLike"[self_, val_]] := self @* "LoadOp"["CONST", {}, self["Type"], self["Device"], N[val]] @* "Reshape"[ConstantArray[1, Length[self["Shape"]]]] @* "Expand"[self["Shape"]]
+LazyBuffer["Const"[self_, val_]] := self @* "LoadOp"["CONST", {}, self["Type"], self["Device"], N[val]] @* "Reshape"[ConstantArray[1, Length[self["Shape"]]]] @* "Expand"[self["Shape"]]
 
 LazyBuffer["ToCPU"[self_]] := Enclose @ Block[{realized},
     realized = Confirm[self @* "Contiguous"[] @* "Realize"[]] @* "Realized" @* "ToCPU"[];
@@ -66,11 +66,7 @@ LazyBuffer["ToCPU"[self_]] := Enclose @ Block[{realized},
 
 LazyBuffer["Cast"[self_, type_]] := If[type === self["Type"], self, ElementwiseOp["CAST", self, "Argument" -> type]]
 
-LazyBuffer["UnaryOp"[self_, op_]] := ElementwiseOp[op, self]
-
-LazyBuffer["BinaryOp"[self_, op_, y_]] := ElementwiseOp[op, self, y]
-
-LazyBuffer["TernaryOp"[self_, op_, y_, z_]] := ElementwiseOp[op, self, y, z]
+LazyBuffer["Elementwise"[self_, op_, others___]] := ElementwiseOp[op, self, others]
 
 LazyBuffer["ReduceOp"[self_, op_, lvl_ : 1]] := With[{shape = MapAt[1 &, self["Shape"], LevelSpan[lvl]]},
      LazyBuffer[self["Device"], ShapeTracker[shape], LazyOp[op, {self}, lvl], self["Type"]]
@@ -90,35 +86,35 @@ LazyBuffer["Permute"[self_, order_List]] := Enclose[
     LazyBuffer[self["Device"], Confirm[ShapeTracker[self["ShapeTracker"]] @ "Permute"[order]], LazyOp["PERMUTE", {self}, order], self["Type"]]
 ]
 
-LazyBuffer["Expand"[self_, dims_List]] := Block[{},
+LazyBuffer["Expand"[self_, dims_List]] := Enclose[
     If[ dims === self["Shape"], Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "EXPAND", Return[self["Op"]["Source"][[1]]["Expand"[dims]]]];
-    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Expand"[dims], LazyOp["EXPAND", {self}, dims], self["Type"]]
+    LazyBuffer[self["Device"], Confirm @ ShapeTracker[self["ShapeTracker"]] @ "Expand"[dims], LazyOp["EXPAND", {self}, dims], self["Type"]]
 ]
 
-LazyBuffer["Reshape"[self_, shape_]] := (
+LazyBuffer["Reshape"[self_, shape_]] := Enclose[
     If[ shape === self["Shape"], Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "RESHAPE",
         Return[self["Op"]["Source"][[1]]["Reshape"[shape]]]
     ];
-    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
-)
+    LazyBuffer[self["Device"], Confirm @ ShapeTracker[self["ShapeTracker"]] @ "Reshape"[shape], LazyOp["RESHAPE", {self}, shape], self["Type"]]
+]
 
-LazyBuffer["Pad"[self_, padding_ : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := (
+LazyBuffer["Pad"[self_, padding_ : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := Enclose[
     If[ MatchQ[padding, {{0, 0} ...}], Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "PAD",
         Return[self["Op"]["Source"][[1]]["Pad"[self["Op"]["Argument"] + padding]]]
     ];
-    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Pad"[padding], LazyOp["PAD", {self}, padding], self["Type"]]
-)
+    LazyBuffer[self["Device"], Confirm @ ShapeTracker[self["ShapeTracker"]] @ "Pad"[padding], LazyOp["PAD", {self}, padding], self["Type"]]
+]
 
-LazyBuffer["Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := (
+LazyBuffer["Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}]] := Enclose[
     If[ ReverseApplied[Subtract] @@@ shrink === shape, Return[self]];
     If[ self["Realized"] =!= None && self["OpName"] === "SHRINK",
         Return[self["Op"]["Source"][[1]]["Shrink"[self["Op"]["Argument"][[All, 1]] + shrink]]]
     ];
-    LazyBuffer[self["Device"], ShapeTracker[self["ShapeTracker"]] @ "Shrink"[shrink], LazyOp["SHRINK", {self}, shrink], self["Type"]]
-)
+    LazyBuffer[self["Device"], Confirm @ ShapeTracker[self["ShapeTracker"]] @ "Shrink"[shrink], LazyOp["SHRINK", {self}, shrink], self["Type"]]
+]
 
 LazyBuffer["Buffers"[self_]] := {self}
 
@@ -173,7 +169,7 @@ ElementwiseOp[PatternSequence[op_, inputs___], OptionsPattern[{"Argument" -> Non
 },
     device = firstSrc["Device"];
     shape = firstSrc["Shape"];
-    srcs = If[LazyBuffer["$Test"][#], If[#["Shape"] =!= firstSrc["Shape"], #["Expand"[firstSrc["Shape"]]], #], firstSrc["ConstLike"[#]]] & /@ {inputs};
+    srcs = If[LazyBuffer["$Test"][#], If[#["Shape"] =!= firstSrc["Shape"], #["Expand"[firstSrc["Shape"]]], #], firstSrc["Const"[#]]] & /@ {inputs};
     type = If[op === "CAST", Replace[OptionValue["Argument"], None :> Tensor["Type"]], firstSrc["Type"]];
     LazyBuffer[device, ShapeTracker[shape], LazyOp[op, srcs, OptionValue["Argument"]], type]
 ]
