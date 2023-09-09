@@ -37,9 +37,18 @@ VerificationTest[(* 4 *)
 ]
 
 VerificationTest[(* 5 *)
-	With[{t=Tensor["Rand"[{4, 5}, "RequiresGradient"->True]]}, 
+	With[{t=Tensor["Rand"[{4, 5}], "RequiresGradient"->True]}, 
 ApproximatelyEqual[Normal@D[Total[t.t\[Transpose], 2], t], FunctionLayer[Function[t, Total[t.t\[Transpose], 2]]][Normal[t], NetPortGradient["t"]]]
 ]
+	,
+	True	
+]
+
+VerificationTest[(* 6 *)
+	x = Tensor["Rand"[{4, 10}]]; 
+y = Tensor[{0, 1, 2, 1}]; 
+ApproximatelyEqual[Normal[x["SparseCategoricalCrossEntropy"[y]]], CrossEntropyLossLayer["Index"][Association["Input" -> SoftmaxLayer[][Normal[x]], 
+    "Target" -> Normal[y] + 1]]]
 	,
 	True	
 ]

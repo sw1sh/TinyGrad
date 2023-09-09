@@ -255,6 +255,28 @@ Class[ShapeTracker,
         self["Resize"[shrink]]
     ],
 
+    "Stride"[self_, mul : {__Integer}] :> Block[{
+        strides, newShape, offset, mask
+    },
+        ConfirmAssert[AllTrue[mul, # != 0 &]];
+        strides = mul * self["Strides"];
+        newShape = Quotient[self["Shape"] + (Abs[mul] - 1), Abs[mul]];
+        offset = (self["Shape"] - 1) . (self["Strides"] * Boole[Thread[mul < 0]]);
+        mask = If[
+            self["Mask"] === None,
+            None,
+            MapThread[
+                {
+                    If[#3 > 0, #1[[1]], #2 - #1[[2]]] + Quotient[Abs[#3] - 1, Abs[#3]],
+                    If[#3 > 0, #1[[2]], #2 - #1[[1]]] + Quotient[Abs[#3] - 1, Abs[#3]]
+                },
+                {self["Mask"], self["Shape"], mul}
+            ]
+        ];
+        self["Views"] = ReplacePart[self["Views"], -1 -> View[newShape, strides, self["Offset"] + offset, mask]];
+        self
+    ],
+
     "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "ShapeTracker",
         self,

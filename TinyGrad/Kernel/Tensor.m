@@ -18,7 +18,7 @@ Class[Tensor,
         Data : TensorData,
         Device : _String | None : None,
         Type : _String | None : None,
-        RequiresGradient : _ ? BooleanQ | None : None
+        RequiresGradient : _ ? BooleanQ | None : True
     ]] :> Enclose @ Block[{
         data = Data,
         device = Replace[Device, None :> "CPU"],
@@ -74,6 +74,8 @@ SetUpValues[self_] := (
     Unequal[self, t_] ^:= (self < t) + (self > t);
     Equal[self, t_] ^:= 1 - (self != t);
 
+    If[self, true_, false_] ^:= self["Where"[true, false]];
+
     Dot[self, w_] ^:= Enclose @ Block[{shape1 = self["Shape"], shape2 = w["Shape"], n1 = self["Rank"], n2 = w["Rank"], i, x, y},
         i = - Min[n2, 2];
         ConfirmAssert[n1 > 0 && n2 > 0];
@@ -107,7 +109,7 @@ SetUpValues[self_] := (
     Total[self, lvl_ : 1] ^:=
         TensorFunction["Reshape"] @ "Apply"[TensorFunction["Sum"] @ "Apply"[self, "Level" -> lvl], "Shape" -> Drop[self["Shape"], lvl]];
 
-    D[self, t_] ^:= Enclose[Confirm @ self["Backward"[]]; t["Gradient"]];
+    D[self, t_] ^:= Enclose[t["Gradient"] = None; Confirm @ self["Backward"[]]; t["Gradient"]];
 
     f_Symbol[self] /; MemberQ[Attributes[f], NumericFunction] ^:= self[SymbolName[f][]];
 )
@@ -267,7 +269,11 @@ Tensor["$Format"[self_, form_]] :=
         },
         {
             {BoxForm`SummaryItem[{"RequiresGradient: ", self["RequiresGradient"]}]},
-            {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]}
+            {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]},
+            If[ self["Context"] === None,
+                Nothing,
+                {BoxForm`SummaryItem[{"Context: ", self["Context"]["$Class"]["$Label"] @@ self["Context"]["Parents"]}]}
+            ]
         },
         form
     ]
@@ -275,7 +281,7 @@ Tensor["$Format"[self_, form_]] :=
 Tensor["Graph"[self_, opts___]] := Block[{edges = {}, visited = {}, deepwalk},
     deepwalk[node_] := (
         AppendTo[visited, node];
-        Scan[If[! MemberQ[visited, #], AppendTo[edges, node -> #]; deepwalk[#]] &, node["Op"]["Source"]];
+        Scan[(AppendTo[edges, DirectedEdge[#, node, If[LazyOpQ[#], #["Argument"], #["Shape"]]]]; If[! MemberQ[visited, #], deepwalk[#]]) &, If[LazyOpQ[node], node, node["Op"]]["Source"]];
     );
 
     deepwalk[self["LazyData"]];
@@ -285,17 +291,20 @@ Tensor["Graph"[self_, opts___]] := Block[{edges = {}, visited = {}, deepwalk},
         opts,
         VertexShapeFunction -> Function[
             Inset[Style[
-                    If[#2["RealizedQ"], Framed, Identity] @ If[
-                        #2["Op"]["Argument"] === None,
-                        #2["OpName"],
-                        #2["OpName"][#2["Op"]["Argument"] /. _RandomGeneratorState :> "seed"]
-                    ],
+                With[{op = If[LazyOpQ[#2], #2, #2["Op"]]},
+                    Which[LazyOpQ[#2], Framed[#, FrameStyle -> Dashed] &, #2["RealizedQ"], Framed, True, Identity] @ If[
+                        op["Argument"] === None,
+                        op["OpName"],
+                        op["OpName"][op["Argument"] /. _RandomGeneratorState :> "seed"]
+                    ]
+                ],
                     Black
                 ],
                 #1,
                 #3
             ]
         ],
+        EdgeLabels -> "EdgeTag",
         GraphLayout -> "LayeredDigraphEmbedding",
         PerformanceGoal -> "Quality"
     ]
@@ -320,7 +329,7 @@ Tensor["Backward"[self_, value_ : 1]] := Enclose @ Block[{grads},
     self["Gradient"] = Tensor[value, "Type" -> self["Type"], "Device" -> self["Device"], "RequiresGradient" -> False];
     Do[
         If[t0["RequiresGradients"] === False, Continue[]];
-        ConfirmAssert[t0["Gradient"] =!= None];
+        ConfirmAssert[t0["Gradient"] =!= None, t0];
         grads = Replace[
             Developer`ToList[t0["Context"]["Backward"[t0["Gradient"]["LazyData"]]]],
             g : Except[None] :> Tensor[g, "Device" -> self["Device"], "RequiresGradient" -> False],
@@ -405,7 +414,7 @@ Tensor["Reduce"[self_, f_, axis_ : None, keepDim_ : False]] := Block[{
 ]
 
 StaticMethod[
-Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ : None], opts___]] :=
+Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ : None]], opts___] :=
     Tensor[
         LazyBuffer @ "LoadOp"[
             op, {size},
@@ -421,60 +430,57 @@ Tensor["LoadOp"[NameValuePattern[op_, size_, device_ : None, type_ : None, arg_ 
 (* RNG *)
 
 StaticMethod[
-Tensor["Rand"[shape : Shape, opts : OptionsPattern[]]] := Tensor["LoadOp"["RAND", Times @@ shape, "arg" -> $RandomGeneratorState, opts]] @ "Reshape"[shape]
+Tensor["Rand"[shape : Shape], opts___] := Tensor["LoadOp"["RAND", Times @@ shape, "arg" -> $RandomGeneratorState], opts] @ "Reshape"[shape]
 ]
 
 
 StaticMethod[
-Tensor["Uniform"[NameValuePattern[shape : Shape, low_ : -1.0, high_ : 1.0], opts : OptionsPattern[]]] :=
-    (high - low) * Tensor["Rand"[shape, opts]] + low
+Tensor["Uniform"[NameValuePattern[shape : Shape, low_ : -1.0, high_ : 1.0]], opts___] :=
+    (high - low) * Tensor["Rand"[shape], opts] + low
 ]
 
 StaticMethod[
-Tensor["ScaledUniform"[shape : Shape, args___]] :=
-    Tensor["Uniform"[shape, args]] / Sqrt[Times @@ shape]
+Tensor["ScaledUniform"[shape : Shape, args___], opts___] :=
+    Tensor["Uniform"[shape, args], opts] / Sqrt[Times @@ shape]
 ]
 
 
 (* Creation *)
 
 StaticMethod[
-Tensor["Full"[shape : Shape, value_, args___]] :=
-    Tensor[value, args] @* "Reshape"[ConstantArray[1, Length[shape]]] @* "Expand"[shape]
+Tensor["Full"[shape : Shape, value_], opts___] :=
+    Tensor[value, opts] @* "Reshape"[ConstantArray[1, Length[shape]]] @* "Expand"[shape]
 ]
 
 StaticMethod[
-Tensor["Zeros"[shape : Shape, args___]] :=
-    Tensor["Full"[shape, 0, args]]
+Tensor["Zeros"[shape : Shape], opts___] :=
+    Tensor["Full"[shape, 0], opts]
 ]
 
 StaticMethod[
-Tensor["Ones"[shape : Shape, args___]] :=
-    Tensor["Full"[shape, 1, args]]
+Tensor["Ones"[shape : Shape], opts___] :=
+    Tensor["Full"[shape, 1], opts]
 ]
 
 StaticMethod[
-Tensor["Arange"[From_Integer, To : _Integer | None : None, step_Integer : 1, args___]] := Block[{from, to},
+Tensor["Arange"[From_Integer, To : _Integer | None : None, step_Integer : 1], opts___] := Block[{from, to},
     {from, to} = If[To === None, {0, From}, {From, To}];
-    Accumulate[Tensor["Full"[{Ceiling[(to - from) / step]}, step, args]]] + (from - step)
-]
-]
+    Accumulate[Tensor["Full"[{Ceiling[(to - from) / step]}, step], opts]] + (from - step)
+]]
 
 StaticMethod[
-Tensor["Eye"[dim_Integer ? Positive, args___]] :=
-    Tensor[{1}, args] @* "Pad"[{{0, dim}}] @* "Reshape"[{1, dim + 1}] @* "Expand"[{dim, dim + 1}] @* "Reshape"[{dim * (dim + 1)}] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[{dim, dim}]
+Tensor["Eye"[dim_Integer ? Positive], opts___] :=
+    Tensor[{1}, opts] @* "Pad"[{{0, dim}}] @* "Reshape"[{1, dim + 1}] @* "Expand"[{dim, dim + 1}] @* "Reshape"[{dim * (dim + 1)}] @* "Shrink"[{{0, dim * dim}}] @* "Reshape"[{dim, dim}]
 ]
 
 
 (* Functional NN *)
 
-StaticMethod[
 Tensor["SparseCategoricalCrossEntropy"[self_, Y_, ignoreIndex_ : -1]] := Block[{
     lossMask = Y != ignoreIndex,
-    yCounter = Tensor["Arange"[self["Shape"][[-1]], "Type" -> "Integer32", "Device" -> self["Device"], "RequiresGradient" -> False]] @* "Unsqueeze"[0] @* "Expand"[{Y["Dimension"], self["Shape"][[-1]]}],
+    yCounter = Tensor["Arange"[self["Shape"][[-1]]], "Type" -> "Integer32", "Device" -> self["Device"], "RequiresGradient" -> False] @* "Unsqueeze"[0] @* "Expand"[{Y["Dimension"], self["Shape"][[-1]]}],
     y
 },
     y = ((yCounter == Y @* "Flatten"[] @* "Reshape"[{-1, 1}]) @ "Where"[-1, 0] * lossMask @ "Reshape"[{-1, 1}]) @ "Reshape"[Append[Y["Shape"], self["Shape"][[-1]]]];
     (self["LogSoftMax"[]] * y)["Sum"[]] / lossMask["Sum"[]]
-]
 ]

@@ -14,24 +14,25 @@ ShapeToAxis[oldShape : Shape, newShape : Shape] := Enclose[
 
 OpFunctionMap = <|
     "ADD" -> Plus, "SUB" -> Subtract, "MUL" -> Times, "DIV" -> Divide,
+    "CMPLT" -> Less, "MAXIMUM" -> Function[{x, y}, x["Maximum"[y]]],
+
     "SUM" -> Function[{x, lvl}, x["$Extend"]["Sum"[lvl, "KeepDims" -> True]]],
     "MAX" -> Function[{x, lvl}, x["$Extend"]["Max"[lvl, "KeepDims" -> True]]],
-    "CMPLT" -> Less,
 
     "NOOP" -> Function[{x}, x],
     "EXP2" -> (2 ^ # &),
     "LOG2" -> Log2,
     "CAST" -> Function[{x, type}, x["Cast"[type]]],
     "SIN" -> Sin,
-    "MAXIMUM" -> Max, "CMPEQ" -> Equal,
     "SQRT" -> Sqrt,
+    "CMPEQ" -> Equal,
 
     "RESHAPE" -> ArrayReshape,
     "SHRINK" -> Function[{x, shrink}, x[[Sequence @@ Span @@@ (shrink + Threaded[{1, 0}])]]],
     "PERMUTE" -> Transpose, "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, x["$Extend"]["Expand"[shape]]],
     "STRIDE" -> Function[{x, strides}, x[[Sequence @@ (;; ;; # & /@ strides)]]],
-    "MULACC" -> EinsteinSummation,
-    "WHERE" -> Function[Null, #1["Where"[##2]]]
+    "MULACC" -> Function[{x, y, lvl}, (x * y)["Sum"[lvl, "KeepDims" -> True]]],
+    "WHERE" -> Function[Null, #1["$Extend"]["Where"[##2]]]
 |>
 
 Class[RawArrayBuffer -> RawBuffer,

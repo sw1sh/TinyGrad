@@ -71,10 +71,10 @@ Class[StridedArray,
         self
     ],
 
-    "$Properties" -> {"Dimension", "TotalSize", "$Normal", "NumericArray"},
+    "$Properties" -> {"Dimension", "Rank", "TotalSize", "$Normal", "NumericArray"},
 
     "Dimension"[self_] :> Times @@ self["Shape"],
-
+    "Rank"[self_] :> Length[self["Shape"]],
     "TotalSize"[self_] :> self["Size"] * self["Dimension"],
 
     "$Format"[self_, form___] :> BoxForm`ArrangeSummaryBox[
@@ -108,7 +108,7 @@ Class[StridedArray,
         perm = Quiet @ FindPermutation[ShapeStrides[shape], strides];
         If[ MatchQ[perm, _Cycles],
             Normal @ If[NumericArrayQ[#], Transpose[#, perm], #] & @ ArrayReshape[Confirm @ RawMemoryImport[pointer, {"NumericArray", dim}], Permute[shape, InversePermutation[perm]]],
-            Array[RawMemoryRead[pointer, ({##} - 1) . strides] &, shape]
+            Normal @ ArrayReshape[ RawMemoryImport[pointer, {"NumericArray", Times @@ shape}][[Flatten[Array[{##} - 1 &, shape] . strides] + 1]], shape]
         ]
     ],
     "NumericArray"[self_] :> RawMemoryImport[self["Pointer"], {"NumericArray", self["Dimension"]}],
@@ -134,6 +134,7 @@ Class[StridedArray,
     "Sum"[self_, lvl_, opts : OptionsPattern[]] :> reduce[Total, self, lvl, opts],
     "Max"[self_, lvl_, opts : OptionsPattern[]] :> reduce[Max, self, lvl, opts],
 
+    "Maximum"[self_, other_] :> With[{lvl = self["Rank"]}, elementwise[MapThread[Max, {#1, #2}, lvl] &, self, {}, {other}]],
     "Less"[self_, other_] :> elementwise[Less, self, {}, {other}],
 
     f_String[self_] /; MemberQ[Attributes[Evaluate @ Symbol[f]], NumericFunction] :> elementwise[Symbol[f], self],

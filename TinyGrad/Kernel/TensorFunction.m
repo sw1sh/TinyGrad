@@ -118,6 +118,7 @@ Class["Max" -> TensorFunction,
 ]
 
 Class["Less" -> TensorFunction,
+    "$Init"[self_, args___] :> (TensorFunction["$Init"[self, args]]; self["RequiresGradient"] = False),
     "Forward"[self_, x_, y_] :> (x < y)
 ]
 

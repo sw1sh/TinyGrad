@@ -11,6 +11,9 @@ Class[LazyBuffer,
         {self["ShapeTracker"], self["Device"], self["Op"], self["Type"], self["Realized"]} = {st, device, op, type, src};
         self["OutputBuffer"] = None;
         self["Op"] = op;
+        self["Children"] = {};
+
+        Scan[(#["Children"] //= Append[self]) &, op["Buffers"]];
 
         Plus[self, y_] ^:= ElementwiseOp["ADD", self, y];
         Subtract[self, y_] ^:= ElementwiseOp["SUB", self, y];
@@ -29,7 +32,7 @@ Class[LazyBuffer,
     "OpName"[self_] :> self["Op"]["Op"],
     "Key"[self_] :> {self["Type"], If[self["Realized"] =!= None, self["Realized"]["Key"], self["Op"]], self["ShapeTracker"]["Key"]},
     "RealizedQ"[self_] :> self["Realized"] =!= None,
-    "$Normal"[self_] :> self["ToCPU"[]],
+    "$Normal"[self_] :> self["ToCPU"[]]
 ]
 
 
@@ -41,6 +44,9 @@ LazyBuffer["Realize"[self_]] := Enclose[
     If[ self["Realized"] === None,
         If[ MemberQ[$LoadOps, self["OpName"]],
             Confirm @ DispatchLoadOp[self["OpName"]][self]
+        ];
+        If[ MemberQ[$ReduceOps, self["OpName"]],
+            self["Op"] = RealizeReduceOps[self]
         ];
         If[ self["Realized"] === None,
             Scan[Confirm[# @ "Realize"[]] &, self["Op"]["Buffers"]];
@@ -180,3 +186,44 @@ DispatchLoadOp = <|
     "CONST" -> RealizeConst,
     "RAND" -> RealizeRand
 |>
+
+RealizeReduceOps[buffer_] := Enclose @ Block[{
+    src = buffer["Op"]["Source"][[1]]
+},
+    If[ ! src["RealizedQ"],
+        If[ src["OpName"] === "EXPAND",
+            Block[{expanded, reshaped, simplified = None},
+                expanded = src["Op"]["Source"][[1]];
+                If[ expanded["OpName"] === "RESHAPE",
+                    reshaped = expanded["Op"]["Source"][[1]];
+                    simplified = simplifySumReshapeExpandSum[buffer, reshaped, src],
+
+                    simplified = simplifySumReshapeExpandSum[buffer, expanded, src]
+                ];
+                If[simplified =!= None, Return[simplified]];
+            ]
+        ];
+        If[ MemberQ[$BinaryOps, src["OpName"]] && Length[src["Children"]] <= 1,
+            If[src["Shape"] === buffer["Shape"], Return[src["Op"]]];
+            src = src["Op"]
+        ]
+    ];
+    LazyOp[buffer["OpName"], {src}, buffer["Op"]["Argument"]]
+]
+
+simplifySumReshapeExpandSum[buffer_, src_, prevSrc_] := Enclose[
+    If[ prevSrc["OpName"] === "EXPAND" &&
+        src["OpName"] === "SUM" &&
+        src["Shape"] === buffer["Shape"],
+
+        With[{
+            shapeDiff = MapThread[If[#1 == #2, Nothing, #1] &, {prevSrc["Shape"], buffer["Shape"]}]
+        },
+            If[ Length[shapeDiff] == 1,
+                Return[LazyOp["MUL", {src, src["Const"[First[shapeDiff]]]}]];
+            ]
+        ]
+    ];
+    None
+]
+

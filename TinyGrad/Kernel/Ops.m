@@ -11,6 +11,7 @@ PackageScope[$LoadOps]
 PackageScope[$MovementOps]
 PackageScope[$OpTypes]
 PackageScope[$Ops]
+PackageScope[LazyOpQ]
 
 PackageImport["Wolfram`Class`"]
 
@@ -28,7 +29,7 @@ $Ops = Join @@ Values[$OpTypes]
 
 Op = Alternatives @@ $Ops
 
-LazyOpQ = MatchQ[LazyOp["$Type"]]
+LazyOpQ = LazyOp["$Test"]
 
 Class[LazyOp,
     "$Init"[self_, op : Op, src_, arg_ : None] :> (
@@ -44,9 +45,10 @@ Class[LazyOp,
             ];
         self
     ),
-    "$Properties" -> {"Buffers"},
+    "$Properties" -> {"Buffers", "OpName"},
 
     "Buffers"[self_] :> Catenate[Through[self["Source"]["Buffers"]]],
+    "OpName"[self_] :> self["Op"],
 
     "$Format"[self_, form_] :> BoxForm`ArrangeSummaryBox[
         "LazyOp",
@@ -81,7 +83,7 @@ Class[Interpreted,
         newContext, sources,
         ret
     },
-        If[ KeyExistsQ[self["Map"], "MULACC"] && ast["Op"] === "SUM" && MatchQ[ast["Source"][[1]], LazyOp["Pattern"]] && ast["Source"][[1]]["Op"] === "MUL",
+        If[ KeyExistsQ[self["Map"], "MULACC"] && ast["Op"] === "SUM" && LazyOpQ[ast["Source"][[1]]] && ast["Source"][[1]]["Op"] === "MUL",
             ast = LazyOp["MULACC", ast["Source"][[1]]["Source"], ast["Argument"]];
         ];
         If[context =!= None && KeyExistsQ[context, ast], Return[context[ast]]];

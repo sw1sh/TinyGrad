@@ -13,7 +13,8 @@ PacletObject[
         "Kernel",
         "Root" -> "Kernel",
         "Context" -> {
-            {"TinyGrad`", "Main.wl"}
+            {"TinyGrad`", "Main.wl"},
+            {"TinyGrad`Tests`MNIST`"}
         },
         "Symbols" -> {
         }
