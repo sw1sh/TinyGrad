@@ -53,6 +53,15 @@ ApproximatelyEqual[Normal[x["SparseCategoricalCrossEntropy"[y]]], CrossEntropyLo
 	True	
 ]
 
+VerificationTest[(* 7 *)
+	trainingData = ResourceData["MNIST", "TrainingData"]; 
+Xtrain = Flatten @* ImageData /@ Keys[trainingData]; 
+w = Tensor["ScaledUniform"[{784, 128}]]; 
+ApproximatelyEqual[Xtrain . Normal[w], Normal[Tensor[Xtrain] . w]]
+	,
+	True	
+]
+
 EndTestSection[]
 
 EndTestSection[]

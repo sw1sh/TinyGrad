@@ -87,7 +87,7 @@ SetUpValues[self_] := (
 
     Accumulate[self, axis_Integer : 0] ^:= self @* "Transpose"[axis, -1] @* "Pad2D"[{self["Shape"][[AxisPart[axis]]] - 1, 0}] @* "Pool"[{self["Shape"][[AxisPart[axis]]]}] @* "Sum"[{-1}] @* "Transpose"[axis, -1];
 
-    Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i - 1, j - 1], order_ :> "Permute"[order]}]];
+    Transpose[self, arg_ : {2, 1}] ^:= self[Replace[arg, {i_ <-> j_ :> "Transpose"[i - 1, j - 1], order_List :> "Permute"[Ordering[order]], cycles_Cycles :> "Permute"[Ordering[PermutationList[cycles]]]}]];
 
     Part[self, args___] ^:= Enclose @ Block[{shape = self["Shape"], shrink, axes, result},
         axes = First[Reap[shrink = MapIndexed[
@@ -272,7 +272,7 @@ Tensor["$Format"[self_, form_]] :=
             {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]},
             If[ self["Context"] === None,
                 Nothing,
-                {BoxForm`SummaryItem[{"Context: ", self["Context"]["$Class"]["$Label"] @@ self["Context"]["Parents"]}]}
+                {BoxForm`SummaryItem[{"Context: ", self["Context"]["$Class"]["$Label"] @@ InputForm /@ self["Context"]["Parents"]}]}
             ]
         },
         form
@@ -290,7 +290,7 @@ Tensor["Graph"[self_, opts___]] := Block[{edges = {}, visited = {}, deepwalk},
         visited, edges,
         opts,
         VertexShapeFunction -> Function[
-            Inset[Style[
+            Inset[ClickToCopy[Style[
                 With[{op = If[LazyOpQ[#2], #2, #2["Op"]]},
                     Which[LazyOpQ[#2], Framed[#, FrameStyle -> Dashed] &, #2["RealizedQ"], Framed, True, Identity] @ If[
                         op["Argument"] === None,
@@ -299,11 +299,12 @@ Tensor["Graph"[self_, opts___]] := Block[{edges = {}, visited = {}, deepwalk},
                     ]
                 ],
                     Black
-                ],
+                ], #2],
                 #1,
                 #3
             ]
         ],
+        EdgeShapeFunction -> "Line",
         EdgeLabels -> "EdgeTag",
         GraphLayout -> "LayeredDigraphEmbedding",
         PerformanceGoal -> "Quality"

@@ -46,7 +46,7 @@ LazyBuffer["Realize"[self_]] := Enclose[
             Confirm @ DispatchLoadOp[self["OpName"]][self]
         ];
         If[ MemberQ[$ReduceOps, self["OpName"]],
-            self["Op"] = RealizeReduceOps[self]
+            self["Op"] = Confirm @ RealizeReduceOps[self]
         ];
         If[ self["Realized"] === None,
             Scan[Confirm[# @ "Realize"[]] &, self["Op"]["Buffers"]];
@@ -132,7 +132,7 @@ LazyBuffer["$Format"[self_, form_]] :=
         {
             BoxForm`SummaryItem[{"Shape: ", self["Shape"]}],
             BoxForm`SummaryItem[{"Type: ", self["Type"]}],
-            BoxForm`SummaryItem[{"Op: ", self["Op"]}],
+            BoxForm`SummaryItem[{"Op: ", InputForm @ self["Op"]}],
             BoxForm`SummaryItem[{"Realized: ", self["Realized"] =!= None}]
         },
         {BoxForm`SummaryItem[{"ShapeTracker: ", self["ShapeTracker"]}]},

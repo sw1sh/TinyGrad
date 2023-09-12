@@ -16,8 +16,8 @@ OpFunctionMap = <|
     "ADD" -> Plus, "SUB" -> Subtract, "MUL" -> Times, "DIV" -> Divide,
     "CMPLT" -> Less, "MAXIMUM" -> Function[{x, y}, x["Maximum"[y]]],
 
-    "SUM" -> Function[{x, lvl}, x["$Extend"]["Sum"[lvl, "KeepDims" -> True]]],
-    "MAX" -> Function[{x, lvl}, x["$Extend"]["Max"[lvl, "KeepDims" -> True]]],
+    "SUM" -> Function[{x, lvl}, StridedArray[x]["Sum"[lvl, "KeepDims" -> True]]],
+    "MAX" -> Function[{x, lvl}, StridedArray[x]["Max"[lvl, "KeepDims" -> True]]],
 
     "NOOP" -> Function[{x}, x],
     "EXP2" -> (2 ^ # &),
@@ -29,10 +29,11 @@ OpFunctionMap = <|
 
     "RESHAPE" -> ArrayReshape,
     "SHRINK" -> Function[{x, shrink}, x[[Sequence @@ Span @@@ (shrink + Threaded[{1, 0}])]]],
-    "PERMUTE" -> Transpose, "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, x["$Extend"]["Expand"[shape]]],
+    "PERMUTE" -> Function[{x, order}, Transpose[x, Ordering[order]]],
+    "PAD" -> ArrayPad, "EXPAND" -> Function[{x, shape}, StridedArray[x]["Expand"[shape]]],
     "STRIDE" -> Function[{x, strides}, x[[Sequence @@ (;; ;; # & /@ strides)]]],
-    "MULACC" -> Function[{x, y, lvl}, (x * y)["Sum"[lvl, "KeepDims" -> True]]],
-    "WHERE" -> Function[Null, #1["$Extend"]["Where"[##2]]]
+    "MULACC" -> Function[{x, y, axes}, x["MulSum"[y, axes]]],
+    "WHERE" -> Function[{test, true, false}, StridedArray[test]["Where"[true, false]]]
 |>
 
 Class[RawArrayBuffer -> RawBuffer,

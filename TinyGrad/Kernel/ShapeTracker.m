@@ -246,7 +246,7 @@ Class[ShapeTracker,
 
     "Pad"[self_, padding : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}] :> Enclose[
         ConfirmAssert[Length[padding] == self["Rank"]];
-        self["Resize"[Thread[{- #1, self["Shape"] + #2}], Thread[{#1, self["Shape"] + #1}]] & @@ Transpose[padding]]
+        self["Resize"[Thread[{- #1, self["Shape"] + #2}], Thread[{#1, self["Shape"] + #1}]] & @@ Thread[padding]]
     ],
 
     "Shrink"[self_, shrink : {{_Integer ? NonNegative, _Integer ? NonNegative} ...}] :> Enclose[
@@ -255,7 +255,7 @@ Class[ShapeTracker,
         self["Resize"[shrink]]
     ],
 
-    "Stride"[self_, mul : {__Integer}] :> Block[{
+    "Stride"[self_, mul : {__Integer}] :> Enclose @ Block[{
         strides, newShape, offset, mask
     },
         ConfirmAssert[AllTrue[mul, # != 0 &]];
@@ -269,7 +269,7 @@ Class[ShapeTracker,
                 {
                     If[#3 > 0, #1[[1]], #2 - #1[[2]]] + Quotient[Abs[#3] - 1, Abs[#3]],
                     If[#3 > 0, #1[[2]], #2 - #1[[1]]] + Quotient[Abs[#3] - 1, Abs[#3]]
-                },
+                } &,
                 {self["Mask"], self["Shape"], mul}
             ]
         ];
