@@ -269,11 +269,11 @@ Tensor["$Format"[self_, form_]] :=
         },
         {
             {BoxForm`SummaryItem[{"RequiresGradient: ", self["RequiresGradient"]}]},
-            {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]},
             If[ self["Context"] === None,
                 Nothing,
                 {BoxForm`SummaryItem[{"Context: ", self["Context"]["$Class"]["$Label"] @@ InputForm /@ self["Context"]["Parents"]}]}
-            ]
+            ],
+            {BoxForm`SummaryItem[{"LazyData: ", self["LazyData"]}]}
         },
         form
     ]

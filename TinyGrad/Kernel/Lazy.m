@@ -132,7 +132,7 @@ LazyBuffer["$Format"[self_, form_]] :=
         {
             BoxForm`SummaryItem[{"Shape: ", self["Shape"]}],
             BoxForm`SummaryItem[{"Type: ", self["Type"]}],
-            BoxForm`SummaryItem[{"Op: ", InputForm @ self["Op"]}],
+            BoxForm`SummaryItem[{"Op: ", self["Op"]}],
             BoxForm`SummaryItem[{"Realized: ", self["Realized"] =!= None}]
         },
         {BoxForm`SummaryItem[{"ShapeTracker: ", self["ShapeTracker"]}]},
